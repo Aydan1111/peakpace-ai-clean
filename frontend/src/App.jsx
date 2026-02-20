@@ -23,17 +23,14 @@ const API_BASE =
 
 /**
  * Turn any backend error response body into a human-readable string.
- * Handles FastAPI's {detail: [...]} arrays, plain strings, and objects.
+ * Handles FastAPI detail arrays [{msg,loc,type}], plain strings, objects.
  */
 function extractErrorMsg(rawText, status) {
   if (!rawText) return `Server error (${status})`;
   try {
     const parsed = JSON.parse(rawText);
     const d = parsed.detail;
-    if (Array.isArray(d)) {
-      // FastAPI validation errors: [{msg, loc, type}, ...]
-      return d.map((e) => e.msg || JSON.stringify(e)).join("; ");
-    }
+    if (Array.isArray(d)) return d.map((e) => e.msg || JSON.stringify(e)).join("; ");
     if (d && typeof d === "object") return d.msg || JSON.stringify(d);
     if (typeof d === "string") return d;
     const fallback = parsed.error || parsed.message;
@@ -45,43 +42,38 @@ function extractErrorMsg(rawText, status) {
 }
 
 /**
- * Forgiving weight parser — accepts:
- *   "9-4"  → 9st 4lb = 130 lbs
- *   "9 4"  → same
- *   "9/4"  → same
- *   "130"  → raw lbs (>50 treated as lbs, ≤50 treated as stone)
+ * Normalize any weight input into the "stone-lbs" string the backend expects.
+ *   "9-4"  → "9-4"   (dash separator)
+ *   "9 4"  → "9-4"   (space separator)
+ *   "9/4"  → "9-4"   (slash separator)
+ *   "130"  → "9-4"   (raw lbs, >50 → lbs, ≤50 → treat as stone only)
  */
-function parseWeightSt(str) {
+function normalizeWeight(str) {
   const s = (str || "").trim();
-  // st-lb with any separator: dash, slash, or space
   const stLb = /^(\d+)[\s\-\/](\d+)$/.exec(s);
-  if (stLb) return parseInt(stLb[1], 10) * 14 + parseInt(stLb[2], 10);
-  // Single number: >50 → raw lbs, ≤50 → treat as stone only
+  if (stLb) return `${stLb[1]}-${stLb[2]}`;
   const n = parseInt(s, 10);
-  if (!isNaN(n)) return n > 50 ? n : n * 14;
-  return 130; // safe fallback
+  if (!isNaN(n)) {
+    const totalLbs = n > 50 ? n : n * 14;
+    return `${Math.floor(totalLbs / 14)}-${totalLbs % 14}`;
+  }
+  return "9-4"; // safe fallback
 }
 
 /**
- * Forgiving distance parser — accepts:
- *   "7f"   → 7
- *   "1m"   → 8
- *   "1m4f" → 12
- *   "2m4f" → 20
- *   "2m 4f"→ 20  (spaces stripped)
- *   "12"   → 12  (raw furlongs)
+ * Normalize distance string for the backend.
+ *   "7f"    → "7f"
+ *   "1m"    → "1m"
+ *   "1m4f"  → "1m4f"
+ *   "2m 4f" → "2m4f"  (spaces stripped)
+ *   "12"    → "12f"   (plain number → append f)
  */
-function parseDistanceStr(str) {
-  // Strip all spaces so "2m 4f" → "2m4f"
+function normalizeDistance(str) {
   const s = (str || "").trim().toLowerCase().replace(/\s+/g, "");
-  const mf = /^(\d+)m(\d+)f$/.exec(s);
-  if (mf) return parseInt(mf[1], 10) * 8 + parseInt(mf[2], 10);
-  const m = /^(\d+)m$/.exec(s);
-  if (m) return parseInt(m[1], 10) * 8;
-  const f = /^(\d+)f$/.exec(s);
-  if (f) return parseInt(f[1], 10);
-  const n = parseFloat(s);
-  return isNaN(n) ? 8 : n;
+  if (!s) return "8f";
+  if (/\d+[mf]/.test(s)) return s;       // already has m or f
+  const n = parseInt(s, 10);
+  return isNaN(n) ? "8f" : `${n}f`;      // bare number → furlongs
 }
 
 // ---------------------------------------------------------------------------
@@ -93,7 +85,7 @@ const DEFAULT_RACE = {
   race_type: "flat",
   surface: "aw",
   distance_str: "1m",
-  going: "standard",
+  going: "good",
 };
 
 const DEFAULT_RUNNERS = [
@@ -115,8 +107,8 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  // Only require: horse name present + at least 2 runners.
-  // Course, form, weight etc. are all optional — backend handles defaults.
+  // Only require horse name + at least 2 runners.
+  // Course, form, weight etc. are optional — backend applies defaults.
   const canSubmitManual =
     !loading &&
     runners.length >= 2 &&
@@ -136,46 +128,57 @@ export default function App() {
           ? `${API_BASE}/analyze-text`
           : `${API_BASE}/analyze`;
 
-      const options =
-        inputMode === "paste"
-          ? {
-              method: "POST",
-              headers: { "Content-Type": "text/plain" },
-              body: pasteText,
-            }
-          : {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                race: {
-                  course: race.course || "",
-                  race_type: race.race_type,
-                  surface: race.surface,
-                  distance_f: parseDistanceStr(race.distance_str),
-                  going: race.going,
-                  country: "UK",
-                  runners: runners.length,
-                  track_config: "standard",
-                },
-                runners: runners.map((r) => ({
-                  name: r.name,
-                  age: r.age || null,
-                  weight_lbs: parseWeightSt(r.weight_st),
-                  form: r.form.trim() || "0",   // blank form → safe default
-                  trainer: r.trainer || "",
-                  jockey: r.jockey || "",
-                  flags: [],
-                  headgear: [],
-                  jockey_claim_lbs: 0,
-                  draw: null,
-                  days_since_run: null,
-                  pace_hint: null,
-                })),
-                mode: "standard",
-              }),
-            };
+      let payload;
 
-      const res = await fetch(url, options);
+      if (inputMode === "paste") {
+        // Backend /analyze-text expects:
+        // { race_info: { course, country, race_type, surface, distance, going },
+        //   racecard_text: "..." }
+        payload = {
+          race_info: {
+            course: race.course || "Unknown",
+            country: "UK",
+            race_type: race.race_type,
+            surface: race.surface,
+            distance: normalizeDistance(race.distance_str),
+            going: race.going,
+          },
+          racecard_text: pasteText,
+        };
+      } else {
+        // Backend /analyze expects a flat AnalyzeRequest:
+        // { course, country, race_type, surface, distance, going,
+        //   runners: [{ name, age, weight, form, trainer, jockey, draw, jockey_claim_lbs }] }
+        // weight → string "stone-lbs" e.g. "9-4"
+        // distance → string e.g. "1m4f"
+        payload = {
+          course: race.course || "Unknown",
+          country: "UK",
+          race_type: race.race_type,
+          surface: race.surface,
+          distance: normalizeDistance(race.distance_str),
+          going: race.going,
+          runners: runners.map((r) => ({
+            name: r.name,
+            age: r.age || 4,
+            weight: normalizeWeight(r.weight_st),
+            form: r.form.trim() || "0",
+            trainer: r.trainer || "",
+            jockey: r.jockey || "",
+            draw: null,
+            jockey_claim_lbs: 0,
+          })),
+        };
+      }
+
+      // DEBUG: verify payload in browser console before sending
+      console.log("FINAL PAYLOAD", JSON.stringify(payload, null, 2));
+
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
 
       if (!res.ok) {
         const raw = await res.text().catch(() => "");
@@ -188,7 +191,6 @@ export default function App() {
       if (err instanceof TypeError && err.message === "Failed to fetch") {
         setError("Cannot reach backend — check API URL or CORS.");
       } else if (inputMode === "paste") {
-        // Give a helpful hint for paste-mode failures
         setError(
           `Could not fully parse racecard — ${err.message || "check formatting."}`
         );
