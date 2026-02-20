@@ -43,10 +43,10 @@ function extractErrorMsg(rawText, status) {
 
 /**
  * Normalize any weight input into the "stone-lbs" string the backend expects.
- *   "9-4"  → "9-4"   (dash separator)
+ *   "9-4"  → "9-4"   (dash separator — passthrough)
  *   "9 4"  → "9-4"   (space separator)
  *   "9/4"  → "9-4"   (slash separator)
- *   "130"  → "9-4"   (raw lbs, >50 → lbs, ≤50 → treat as stone only)
+ *   "130"  → "9-4"   (raw lbs → convert back to stone-lbs)
  */
 function normalizeWeight(str) {
   const s = (str || "").trim();
@@ -71,9 +71,9 @@ function normalizeWeight(str) {
 function normalizeDistance(str) {
   const s = (str || "").trim().toLowerCase().replace(/\s+/g, "");
   if (!s) return "8f";
-  if (/\d+[mf]/.test(s)) return s;       // already has m or f
+  if (/\d+[mf]/.test(s)) return s;
   const n = parseInt(s, 10);
-  return isNaN(n) ? "8f" : `${n}f`;      // bare number → furlongs
+  return isNaN(n) ? "8f" : `${n}f`;
 }
 
 // ---------------------------------------------------------------------------
@@ -103,19 +103,24 @@ export default function App() {
   const [race, setRace] = useState(DEFAULT_RACE);
   const [runners, setRunners] = useState(DEFAULT_RUNNERS);
   const [pasteText, setPasteText] = useState("");
+  const [imageFile, setImageFile] = useState(null);
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  // Only require horse name + at least 2 runners.
-  // Course, form, weight etc. are optional — backend applies defaults.
+  // Only require horse name + at least 2 runners for manual mode.
   const canSubmitManual =
     !loading &&
     runners.length >= 2 &&
     runners.every((r) => r.name.trim() !== "");
 
   const canSubmitPaste = !loading && pasteText.trim().length > 0;
-  const canSubmit = inputMode === "manual" ? canSubmitManual : canSubmitPaste;
+  const canSubmitImage = !loading && imageFile != null;
+
+  const canSubmit =
+    inputMode === "manual" ? canSubmitManual :
+    inputMode === "paste"  ? canSubmitPaste  :
+                             canSubmitImage;
 
   const analyze = async () => {
     setLoading(true);
@@ -124,54 +129,69 @@ export default function App() {
 
     try {
       const url =
-        inputMode === "paste"
-          ? `${API_BASE}/analyze-text`
-          : `${API_BASE}/analyze`;
+        inputMode === "paste"  ? `${API_BASE}/analyze-text`  :
+        inputMode === "image"  ? `${API_BASE}/analyze-image` :
+                                 `${API_BASE}/analyze`;
 
+      // -----------------------------------------------------------------
+      // IMAGE MODE — multipart FormData, no JSON
+      // -----------------------------------------------------------------
+      if (inputMode === "image") {
+        const form = new FormData();
+        form.append("file", imageFile);
+
+        console.log("FINAL PAYLOAD [image]", imageFile.name, imageFile.size, "bytes");
+
+        const res = await fetch(url, { method: "POST", body: form });
+        if (!res.ok) {
+          const raw = await res.text().catch(() => "");
+          throw new Error(extractErrorMsg(raw, res.status));
+        }
+        setResult(await res.json());
+        return;
+      }
+
+      // -----------------------------------------------------------------
+      // JSON MODES — paste and manual
+      // -----------------------------------------------------------------
       let payload;
 
       if (inputMode === "paste") {
-        // Backend /analyze-text expects:
-        // { race_info: { course, country, race_type, surface, distance, going },
-        //   racecard_text: "..." }
+        // /analyze-text expects { race_info: {...}, racecard_text: "..." }
         payload = {
           race_info: {
-            course: race.course || "Unknown",
-            country: "UK",
+            course:    race.course || "Unknown",
+            country:   "UK",
             race_type: race.race_type,
-            surface: race.surface,
-            distance: normalizeDistance(race.distance_str),
-            going: race.going,
+            surface:   race.surface,
+            distance:  normalizeDistance(race.distance_str),
+            going:     race.going,
           },
           racecard_text: pasteText,
         };
       } else {
-        // Backend /analyze expects a flat AnalyzeRequest:
-        // { course, country, race_type, surface, distance, going,
-        //   runners: [{ name, age, weight, form, trainer, jockey, draw, jockey_claim_lbs }] }
-        // weight → string "stone-lbs" e.g. "9-4"
-        // distance → string e.g. "1m4f"
+        // /analyze expects flat AnalyzeRequest
+        // weight → "stone-lbs" string  |  distance → "1m4f" string
         payload = {
-          course: race.course || "Unknown",
-          country: "UK",
+          course:    race.course || "Unknown",
+          country:   "UK",
           race_type: race.race_type,
-          surface: race.surface,
-          distance: normalizeDistance(race.distance_str),
-          going: race.going,
+          surface:   race.surface,
+          distance:  normalizeDistance(race.distance_str),
+          going:     race.going,
           runners: runners.map((r) => ({
-            name: r.name,
-            age: r.age || 4,
-            weight: normalizeWeight(r.weight_st),
-            form: r.form.trim() || "0",
-            trainer: r.trainer || "",
-            jockey: r.jockey || "",
-            draw: null,
+            name:            r.name,
+            age:             r.age || 4,
+            weight:          normalizeWeight(r.weight_st),
+            form:            r.form.trim() || "",
+            trainer:         r.trainer || "",
+            jockey:          r.jockey || "",
+            draw:            null,
             jockey_claim_lbs: 0,
           })),
         };
       }
 
-      // DEBUG: verify payload in browser console before sending
       console.log("FINAL PAYLOAD", JSON.stringify(payload, null, 2));
 
       const res = await fetch(url, {
@@ -185,15 +205,10 @@ export default function App() {
         throw new Error(extractErrorMsg(raw, res.status));
       }
 
-      const data = await res.json();
-      setResult(data);
+      setResult(await res.json());
     } catch (err) {
       if (err instanceof TypeError && err.message === "Failed to fetch") {
         setError("Cannot reach backend — check API URL or CORS.");
-      } else if (inputMode === "paste") {
-        setError(
-          `Could not fully parse racecard — ${err.message || "check formatting."}`
-        );
       } else {
         setError(err.message || "Request failed");
       }
@@ -223,8 +238,24 @@ export default function App() {
             <RaceForm race={race} onChange={setRace} />
             <RunnerTable runners={runners} onChange={setRunners} />
           </>
-        ) : (
+        ) : inputMode === "paste" ? (
           <PasteInput value={pasteText} onChange={setPasteText} />
+        ) : (
+          <section className="bg-surface rounded-xl border border-border p-6">
+            <h2 className="text-lg font-semibold text-gold mb-1">Upload Screenshot</h2>
+            <p className="text-text-dim text-xs mb-4">
+              Upload a screenshot of the racecard — OCR will extract runners automatically.
+            </p>
+            <input
+              type="file"
+              accept="image/*"
+              onChange={(e) => setImageFile(e.target.files?.[0] || null)}
+              className="input text-sm"
+            />
+            {imageFile && (
+              <p className="text-text-dim text-xs mt-2">{imageFile.name}</p>
+            )}
+          </section>
         )}
 
         <div className="flex justify-center">
