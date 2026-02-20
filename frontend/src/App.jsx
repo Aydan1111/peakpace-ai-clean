@@ -1,5 +1,3 @@
-// force rebuild
-
 import { useState } from "react";
 import ModeToggle from "./components/ModeToggle";
 import RaceForm from "./components/RaceForm";
@@ -8,30 +6,23 @@ import PasteInput from "./components/PasteInput";
 import ResultsPanel from "./components/ResultsPanel";
 import Spinner from "./components/Spinner";
 
-/*
-  CLEAN PRODUCTION API SETUP
-  --------------------------
-  1️⃣ Uses Vercel env variable if set
-  2️⃣ Falls back to your current backend
-*/
-const API_BASE =
-  (import.meta.env.VITE_API_BASE_URL ||
-    "https://peakpace-ai.onrender.com"
-  ).replace(/\/+$/, "");
+const API_BASE = (
+  import.meta.env.VITE_API_BASE_URL ||
+  "https://peakpace-ai.onrender.com"
+).replace(/\/+$/, "");
 
 const DEFAULT_RACE = {
   course: "",
   race_type: "flat",
   surface: "aw",
   distance_f: 8,
-  race_class: 4,
   going: "standard",
 };
 
 const DEFAULT_RUNNERS = [
-  { name: "", age: 4, weight_lbs: 130, form: "", trainer: "", jockey: "" },
-  { name: "", age: 4, weight_lbs: 130, form: "", trainer: "", jockey: "" },
-  { name: "", age: 4, weight_lbs: 130, form: "", trainer: "", jockey: "" },
+  { name: "", age: 4, weight_lbs: "9-0", form: "", trainer: "", jockey: "" },
+  { name: "", age: 4, weight_lbs: "9-0", form: "", trainer: "", jockey: "" },
+  { name: "", age: 4, weight_lbs: "9-0", form: "", trainer: "", jockey: "" },
 ];
 
 export default function App() {
@@ -97,44 +88,28 @@ export default function App() {
 
       if (!res.ok) {
         const raw = await res.text().catch(() => "");
-        let msg = `Server error (${res.status})`;
-
-        if (raw) {
-          try {
-            const parsed = JSON.parse(raw);
-            msg = parsed.detail || parsed.error || parsed.message || raw;
-          } catch {
-            msg = raw;
-          }
-        }
-
-        throw new Error(msg);
+        throw new Error(raw || `Server error (${res.status})`);
       }
 
       const data = await res.json();
       setResult(data);
     } catch (err) {
-      if (err instanceof TypeError && err.message === "Failed to fetch") {
-        setError("Cannot reach backend — check API URL or CORS.");
-      } else {
-        setError(err.message || "Request failed");
-      }
+      setError(err.message || "Request failed");
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="min-h-screen px-4 py-8 sm:px-6 lg:px-8">
+    <div className="min-h-screen px-4 py-8">
       <div className="max-w-5xl mx-auto space-y-6">
-
-        <header className="text-center mb-2">
-          <h1 className="text-3xl sm:text-4xl font-bold tracking-tight">
+        <header className="text-center">
+          <h1 className="text-4xl font-bold">
             <span className="text-gold">PeakPace</span>{" "}
             <span className="text-text-dim font-light">AI</span>
           </h1>
           <p className="text-text-dim text-sm mt-1">
-            Racing intelligence for UK &amp; Irish horse racing
+            Racing intelligence for UK & Irish horse racing
           </p>
         </header>
 
