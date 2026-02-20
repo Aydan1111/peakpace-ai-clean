@@ -114,54 +114,90 @@ class AnalyzeTextRequest(BaseModel):
 # Reused by /analyze-text and /analyze-image
 # -------------------------------------------------
 
+FIELD_KEYS = re.compile(
+    r"(Age|Weight|Trainer|Jockey|Form|F)\s*:", re.I
+)
+
+
+def _extract_fields(current: dict, text: str):
+    """Pull Age/Weight/Trainer/Jockey/Form from a text fragment.
+
+    Splits on field-key boundaries so each regex only sees its own
+    key:value pair — prevents greedy `.+` from swallowing later fields.
+    """
+    parts = FIELD_KEYS.split(text)
+    tokens = []
+    i = 1  # parts[0] is text before first key (usually empty)
+    while i < len(parts) - 1:
+        tokens.append(parts[i] + ":" + parts[i + 1])
+        i += 2
+
+    for token in (tokens if tokens else [text]):
+        m = re.search(r"age[:\s]+(\d+)", token, re.I)
+        if m:
+            current["age"] = int(m.group(1))
+        m = re.search(r"weight[:\s]+([\d\-]+)", token, re.I)
+        if m:
+            current["weight"] = m.group(1)
+        m = re.search(r"trainer[:\s]+(.+)", token, re.I)
+        if m:
+            current["trainer"] = m.group(1).strip()
+        m = re.search(r"jockey[:\s]+(.+)", token, re.I)
+        if m:
+            current["jockey"] = m.group(1).strip()
+        m = re.search(r"(?:^f|form)[:\s]+([0-9/\-]+)", token, re.I)
+        if m:
+            current["form"] = m.group(1)
+
+
 def parse_racecard_text(text: str) -> list:
     """
     Tolerant parser for racecard-style text.
 
-    Recognises lines with any of:
-        Jockey: X   Trainer: Y   Age: N   Weight: S-P   F: form / Form: form
-
-    Lines with NO colon are treated as a horse name; encountering one
-    finalises the previous runner and starts a new one.
+    Uses FIELD_KEYS regex to locate field boundaries in each line.
+    If a field key starts after position 0, the text before it is the
+    horse name.  This correctly handles both single-line-per-runner
+    (e.g. "Horse A Age: 4 Weight: 9-4 Trainer: Smith Jockey: Doyle")
+    and multi-line formats.
 
     Safe defaults are applied for any missing optional fields.
-    Returns only entries that have a name.
+    Returns only entries that have a name AND at least one data field.
     """
     lines = [l.strip() for l in text.split("\n") if l.strip()]
     runners = []
     current = {}
 
     for line in lines:
-        if ":" not in line:
-            # New horse name — finalise previous runner if it has data
-            if current:
+        first_field = FIELD_KEYS.search(line)
+
+        if first_field and first_field.start() > 0:
+            # Text before first field key = horse name
+            name_part = line[:first_field.start()].strip()
+            if name_part:
+                if current and "name" in current:
+                    runners.append(current)
+                current = {"name": name_part}
+            _extract_fields(current, line[first_field.start():])
+
+        elif first_field and first_field.start() == 0:
+            # Line starts with a field key (e.g. "Age: 4")
+            _extract_fields(current, line)
+
+        else:
+            # No field key at all — entire line is a horse name
+            if current and "name" in current:
                 runners.append(current)
             current = {"name": line}
-            continue
-
-        # Try to extract individual fields from this line
-        age_m    = re.search(r"age[:\s]+(\d+)", line, re.I)
-        weight_m = re.search(r"weight[:\s]+([\d\-]+)", line, re.I)
-        trainer_m= re.search(r"trainer[:\s]+(.+)", line, re.I)
-        jockey_m = re.search(r"jockey[:\s]+(.+)", line, re.I)
-        form_m   = re.search(r"(?:^f|form)[:\s]+([0-9/\-]+)", line, re.I)
-
-        if age_m:     current["age"]     = int(age_m.group(1))
-        if weight_m:  current["weight"]  = weight_m.group(1)
-        if trainer_m: current["trainer"] = trainer_m.group(1).strip()
-        if jockey_m:  current["jockey"]  = jockey_m.group(1).strip()
-        if form_m:    current["form"]    = form_m.group(1)
 
     # Finalise the last runner
-    if current:
+    if current and "name" in current:
         runners.append(current)
 
-    # Build clean list — skip any entry with no name or no real runner data
+    # Build clean list — skip entries with ONLY a name (headers/junk)
     cleaned = []
     for r in runners:
         if "name" not in r:
             continue
-        # Skip header/title lines that have no runner-specific data at all
         has_data = any(k in r for k in ("age", "weight", "jockey", "trainer", "form"))
         if not has_data:
             continue
@@ -255,6 +291,50 @@ def analyze_text(request: AnalyzeTextRequest):
 
 
 # -------------------------------------------------
+# DEBUG PARSER (for troubleshooting paste/OCR)
+# -------------------------------------------------
+
+class DebugParseRequest(BaseModel):
+    text: str
+
+
+@app.post("/debug-parse")
+def debug_parse(request: DebugParseRequest):
+    """Return raw + cleaned parser output for debugging."""
+    lines = [l.strip() for l in request.text.split("\n") if l.strip()]
+
+    # Run parser without the has_data filter to get raw runners
+    raw_runners = []
+    current = {}
+    for line in lines:
+        first_field = FIELD_KEYS.search(line)
+        if first_field and first_field.start() > 0:
+            name_part = line[:first_field.start()].strip()
+            if name_part:
+                if current and "name" in current:
+                    raw_runners.append(current)
+                current = {"name": name_part}
+            _extract_fields(current, line[first_field.start():])
+        elif first_field and first_field.start() == 0:
+            _extract_fields(current, line)
+        else:
+            if current and "name" in current:
+                raw_runners.append(current)
+            current = {"name": line}
+    if current and "name" in current:
+        raw_runners.append(current)
+
+    cleaned = parse_racecard_text(request.text)
+
+    return {
+        "lines": lines,
+        "runners_raw": raw_runners,
+        "runners_clean": cleaned,
+        "count": len(cleaned),
+    }
+
+
+# -------------------------------------------------
 # ANALYZE IMAGE (SCREENSHOT MODE)
 # -------------------------------------------------
 
@@ -275,9 +355,14 @@ async def analyze_image(file: UploadFile = File(...)):
         runners = parse_racecard_text(extracted_text)
 
         if len(runners) < 2:
+            ocr_preview = extracted_text[:1000]
             raise HTTPException(
                 status_code=400,
-                detail=f"OCR found {len(runners)} runner(s). Try a clearer screenshot.",
+                detail=(
+                    f"OCR found {len(runners)} runner(s). Need at least 2. "
+                    f"Try a clearer screenshot.\n\n"
+                    f"--- OCR text (first 1000 chars) ---\n{ocr_preview}"
+                ),
             )
 
         race = RaceInfo(
