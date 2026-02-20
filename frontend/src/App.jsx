@@ -6,7 +6,16 @@ import PasteInput from "./components/PasteInput";
 import ResultsPanel from "./components/ResultsPanel";
 import Spinner from "./components/Spinner";
 
-const API_BASE = (import.meta.env.VITE_API_BASE_URL || "https://peakpace-ai.onrender.com").replace(/\/+$/, "");
+/*
+  CLEAN PRODUCTION API SETUP
+  --------------------------
+  1️⃣ Uses Vercel env variable if set
+  2️⃣ Falls back to your current backend
+*/
+const API_BASE =
+  (import.meta.env.VITE_API_BASE_URL ||
+    "https://peakpace-ai.onrender.com"
+  ).replace(/\/+$/, "");
 
 const DEFAULT_RACE = {
   course: "",
@@ -39,7 +48,6 @@ export default function App() {
     runners.every((r) => r.name.trim() !== "" && r.form.trim() !== "");
 
   const canSubmitPaste = !loading && pasteText.trim().length > 0;
-
   const canSubmit = inputMode === "manual" ? canSubmitManual : canSubmitPaste;
 
   const analyze = async () => {
@@ -83,12 +91,12 @@ export default function App() {
               }),
             };
 
-      console.log(`[PeakPace] POST ${url}`);
       const res = await fetch(url, options);
 
       if (!res.ok) {
         const raw = await res.text().catch(() => "");
         let msg = `Server error (${res.status})`;
+
         if (raw) {
           try {
             const parsed = JSON.parse(raw);
@@ -97,20 +105,17 @@ export default function App() {
             msg = raw;
           }
         }
-        console.error(`[PeakPace] ${res.status}:`, msg);
+
         throw new Error(msg);
       }
 
       const data = await res.json();
-      console.log("[PeakPace] Success:", data);
       setResult(data);
     } catch (err) {
-      console.error("[PeakPace] Error:", err);
       if (err instanceof TypeError && err.message === "Failed to fetch") {
-        setError("Cannot reach the server — check if the backend is running and CORS is enabled.");
-        console.error("[PeakPace] Hint: VITE_API_BASE_URL =", API_BASE);
+        setError("Cannot reach backend — check API URL or CORS.");
       } else {
-        setError(err.message || "Request failed — check console for details");
+        setError(err.message || "Request failed");
       }
     } finally {
       setLoading(false);
@@ -120,7 +125,7 @@ export default function App() {
   return (
     <div className="min-h-screen px-4 py-8 sm:px-6 lg:px-8">
       <div className="max-w-5xl mx-auto space-y-6">
-        {/* Header */}
+
         <header className="text-center mb-2">
           <h1 className="text-3xl sm:text-4xl font-bold tracking-tight">
             <span className="text-gold">PeakPace</span>{" "}
@@ -131,10 +136,8 @@ export default function App() {
           </p>
         </header>
 
-        {/* Mode Toggle */}
         <ModeToggle mode={inputMode} onChange={setInputMode} />
 
-        {/* Input — Manual or Paste */}
         {inputMode === "manual" ? (
           <>
             <RaceForm race={race} onChange={setRace} />
@@ -144,7 +147,6 @@ export default function App() {
           <PasteInput value={pasteText} onChange={setPasteText} />
         )}
 
-        {/* Analyze button */}
         <div className="flex justify-center">
           <button
             type="button"
@@ -152,21 +154,18 @@ export default function App() {
             onClick={analyze}
             className="btn-primary text-base px-10 py-3"
           >
-            {loading ? "Analyzing\u2026" : "Analyze Race"}
+            {loading ? "Analyzing…" : "Analyze Race"}
           </button>
         </div>
 
-        {/* Error */}
         {error && (
           <div className="bg-red-500/10 border border-red-500/40 rounded-lg p-4 text-red-400 text-sm text-center">
             {error}
           </div>
         )}
 
-        {/* Loading */}
         {loading && <Spinner />}
 
-        {/* Results */}
         <ResultsPanel result={result} />
       </div>
     </div>
