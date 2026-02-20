@@ -17,17 +17,63 @@ const API_BASE =
     "https://peakpace-ai.onrender.com"
   ).replace(/\/+$/, "");
 
-// Convert "9-4" (9 stone 4 lb) to total pounds for backend
-function parseWeightSt(str) {
-  const match = /^(\d+)-(\d+)$/.exec((str || "").trim());
-  if (!match) return 130;
-  return parseInt(match[1], 10) * 14 + parseInt(match[2], 10);
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Turn any backend error response body into a human-readable string.
+ * Handles FastAPI's {detail: [...]} arrays, plain strings, and objects.
+ */
+function extractErrorMsg(rawText, status) {
+  if (!rawText) return `Server error (${status})`;
+  try {
+    const parsed = JSON.parse(rawText);
+    const d = parsed.detail;
+    if (Array.isArray(d)) {
+      // FastAPI validation errors: [{msg, loc, type}, ...]
+      return d.map((e) => e.msg || JSON.stringify(e)).join("; ");
+    }
+    if (d && typeof d === "object") return d.msg || JSON.stringify(d);
+    if (typeof d === "string") return d;
+    const fallback = parsed.error || parsed.message;
+    if (typeof fallback === "string") return fallback;
+    return JSON.stringify(parsed);
+  } catch {
+    return rawText;
+  }
 }
 
-// Convert distance string to furlongs for backend
-// "7f" → 7 | "1m" → 8 | "1m4f" → 12 | "2m4f" → 20
+/**
+ * Forgiving weight parser — accepts:
+ *   "9-4"  → 9st 4lb = 130 lbs
+ *   "9 4"  → same
+ *   "9/4"  → same
+ *   "130"  → raw lbs (>50 treated as lbs, ≤50 treated as stone)
+ */
+function parseWeightSt(str) {
+  const s = (str || "").trim();
+  // st-lb with any separator: dash, slash, or space
+  const stLb = /^(\d+)[\s\-\/](\d+)$/.exec(s);
+  if (stLb) return parseInt(stLb[1], 10) * 14 + parseInt(stLb[2], 10);
+  // Single number: >50 → raw lbs, ≤50 → treat as stone only
+  const n = parseInt(s, 10);
+  if (!isNaN(n)) return n > 50 ? n : n * 14;
+  return 130; // safe fallback
+}
+
+/**
+ * Forgiving distance parser — accepts:
+ *   "7f"   → 7
+ *   "1m"   → 8
+ *   "1m4f" → 12
+ *   "2m4f" → 20
+ *   "2m 4f"→ 20  (spaces stripped)
+ *   "12"   → 12  (raw furlongs)
+ */
 function parseDistanceStr(str) {
-  const s = (str || "").trim().toLowerCase();
+  // Strip all spaces so "2m 4f" → "2m4f"
+  const s = (str || "").trim().toLowerCase().replace(/\s+/g, "");
   const mf = /^(\d+)m(\d+)f$/.exec(s);
   if (mf) return parseInt(mf[1], 10) * 8 + parseInt(mf[2], 10);
   const m = /^(\d+)m$/.exec(s);
@@ -37,6 +83,10 @@ function parseDistanceStr(str) {
   const n = parseFloat(s);
   return isNaN(n) ? 8 : n;
 }
+
+// ---------------------------------------------------------------------------
+// Defaults
+// ---------------------------------------------------------------------------
 
 const DEFAULT_RACE = {
   course: "",
@@ -52,6 +102,10 @@ const DEFAULT_RUNNERS = [
   { name: "", age: 4, weight_st: "9-4", form: "", trainer: "", jockey: "" },
 ];
 
+// ---------------------------------------------------------------------------
+// App
+// ---------------------------------------------------------------------------
+
 export default function App() {
   const [inputMode, setInputMode] = useState("manual");
   const [race, setRace] = useState(DEFAULT_RACE);
@@ -61,11 +115,12 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
+  // Only require: horse name present + at least 2 runners.
+  // Course, form, weight etc. are all optional — backend handles defaults.
   const canSubmitManual =
     !loading &&
-    race.course.trim() !== "" &&
     runners.length >= 2 &&
-    runners.every((r) => r.name.trim() !== "" && r.form.trim() !== "");
+    runners.every((r) => r.name.trim() !== "");
 
   const canSubmitPaste = !loading && pasteText.trim().length > 0;
   const canSubmit = inputMode === "manual" ? canSubmitManual : canSubmitPaste;
@@ -93,7 +148,7 @@ export default function App() {
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
                 race: {
-                  course: race.course,
+                  course: race.course || "",
                   race_type: race.race_type,
                   surface: race.surface,
                   distance_f: parseDistanceStr(race.distance_str),
@@ -104,11 +159,11 @@ export default function App() {
                 },
                 runners: runners.map((r) => ({
                   name: r.name,
-                  age: r.age,
+                  age: r.age || null,
                   weight_lbs: parseWeightSt(r.weight_st),
-                  form: r.form,
-                  trainer: r.trainer,
-                  jockey: r.jockey,
+                  form: r.form.trim() || "0",   // blank form → safe default
+                  trainer: r.trainer || "",
+                  jockey: r.jockey || "",
                   flags: [],
                   headgear: [],
                   jockey_claim_lbs: 0,
@@ -124,18 +179,7 @@ export default function App() {
 
       if (!res.ok) {
         const raw = await res.text().catch(() => "");
-        let msg = `Server error (${res.status})`;
-
-        if (raw) {
-          try {
-            const parsed = JSON.parse(raw);
-            msg = parsed.detail || parsed.error || parsed.message || raw;
-          } catch {
-            msg = raw;
-          }
-        }
-
-        throw new Error(msg);
+        throw new Error(extractErrorMsg(raw, res.status));
       }
 
       const data = await res.json();
@@ -143,6 +187,11 @@ export default function App() {
     } catch (err) {
       if (err instanceof TypeError && err.message === "Failed to fetch") {
         setError("Cannot reach backend — check API URL or CORS.");
+      } else if (inputMode === "paste") {
+        // Give a helpful hint for paste-mode failures
+        setError(
+          `Could not fully parse racecard — ${err.message || "check formatting."}`
+        );
       } else {
         setError(err.message || "Request failed");
       }
