@@ -1,4 +1,13 @@
-const GOING_OPTIONS = ["standard", "soft", "heavy", "good"];
+const GOING_OPTIONS = [
+  { value: "heavy", label: "Heavy" },
+  { value: "soft", label: "Soft" },
+  { value: "good_to_soft", label: "Good to Soft" },
+  { value: "good", label: "Good" },
+  { value: "good_to_firm", label: "Good to Firm" },
+  { value: "firm", label: "Firm" },
+  { value: "standard", label: "Standard" },
+];
+
 const RACE_TYPE_OPTIONS = ["flat", "jumps"];
 const SURFACE_OPTIONS = [
   { value: "aw", label: "All Weather" },
@@ -22,13 +31,12 @@ export default function RaceForm({ race, onChange }) {
           />
         </Field>
 
-        <Field label="Distance (furlongs)">
+        <Field label="Distance (e.g. 1m4f, 7f, 2m)">
           <input
-            type="number"
-            min={4}
-            max={36}
-            value={race.distance_f}
-            onChange={(e) => set("distance_f", Number(e.target.value))}
+            type="text"
+            value={race.distance_str}
+            onChange={(e) => set("distance_str", e.target.value)}
+            placeholder="e.g. 1m4f"
             className="input"
           />
         </Field>
@@ -54,8 +62,8 @@ export default function RaceForm({ race, onChange }) {
             className="input"
           >
             {GOING_OPTIONS.map((o) => (
-              <option key={o} value={o}>
-                {o.charAt(0).toUpperCase() + o.slice(1)}
+              <option key={o.value} value={o.value}>
+                {o.label}
               </option>
             ))}
           </select>

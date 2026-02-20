@@ -24,11 +24,25 @@ function parseWeightSt(str) {
   return parseInt(match[1], 10) * 14 + parseInt(match[2], 10);
 }
 
+// Convert distance string to furlongs for backend
+// "7f" → 7 | "1m" → 8 | "1m4f" → 12 | "2m4f" → 20
+function parseDistanceStr(str) {
+  const s = (str || "").trim().toLowerCase();
+  const mf = /^(\d+)m(\d+)f$/.exec(s);
+  if (mf) return parseInt(mf[1], 10) * 8 + parseInt(mf[2], 10);
+  const m = /^(\d+)m$/.exec(s);
+  if (m) return parseInt(m[1], 10) * 8;
+  const f = /^(\d+)f$/.exec(s);
+  if (f) return parseInt(f[1], 10);
+  const n = parseFloat(s);
+  return isNaN(n) ? 8 : n;
+}
+
 const DEFAULT_RACE = {
   course: "",
   race_type: "flat",
   surface: "aw",
-  distance_f: 8,
+  distance_str: "1m",
   going: "standard",
 };
 
@@ -79,7 +93,11 @@ export default function App() {
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
                 race: {
-                  ...race,
+                  course: race.course,
+                  race_type: race.race_type,
+                  surface: race.surface,
+                  distance_f: parseDistanceStr(race.distance_str),
+                  going: race.going,
                   country: "UK",
                   runners: runners.length,
                   track_config: "standard",
