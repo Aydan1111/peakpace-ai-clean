@@ -6,10 +6,23 @@ import PasteInput from "./components/PasteInput";
 import ResultsPanel from "./components/ResultsPanel";
 import Spinner from "./components/Spinner";
 
-const API_BASE = (
-  import.meta.env.VITE_API_BASE_URL ||
-  "https://peakpace-ai.onrender.com"
-).replace(/\/+$/, "");
+/*
+  CLEAN PRODUCTION API SETUP
+  --------------------------
+  1️⃣ Uses Vercel env variable if set
+  2️⃣ Falls back to your current backend
+*/
+const API_BASE =
+  (import.meta.env.VITE_API_BASE_URL ||
+    "https://peakpace-ai.onrender.com"
+  ).replace(/\/+$/, "");
+
+// Convert "9-4" (9 stone 4 lb) to total pounds for backend
+function parseWeightSt(str) {
+  const match = /^(\d+)-(\d+)$/.exec((str || "").trim());
+  if (!match) return 130;
+  return parseInt(match[1], 10) * 14 + parseInt(match[2], 10);
+}
 
 const DEFAULT_RACE = {
   course: "",
@@ -20,9 +33,9 @@ const DEFAULT_RACE = {
 };
 
 const DEFAULT_RUNNERS = [
-  { name: "", age: 4, weight_lbs: "9-0", form: "", trainer: "", jockey: "" },
-  { name: "", age: 4, weight_lbs: "9-0", form: "", trainer: "", jockey: "" },
-  { name: "", age: 4, weight_lbs: "9-0", form: "", trainer: "", jockey: "" },
+  { name: "", age: 4, weight_st: "9-4", form: "", trainer: "", jockey: "" },
+  { name: "", age: 4, weight_st: "9-4", form: "", trainer: "", jockey: "" },
+  { name: "", age: 4, weight_st: "9-4", form: "", trainer: "", jockey: "" },
 ];
 
 export default function App() {
@@ -72,7 +85,12 @@ export default function App() {
                   track_config: "standard",
                 },
                 runners: runners.map((r) => ({
-                  ...r,
+                  name: r.name,
+                  age: r.age,
+                  weight_lbs: parseWeightSt(r.weight_st),
+                  form: r.form,
+                  trainer: r.trainer,
+                  jockey: r.jockey,
                   flags: [],
                   headgear: [],
                   jockey_claim_lbs: 0,
@@ -88,28 +106,44 @@ export default function App() {
 
       if (!res.ok) {
         const raw = await res.text().catch(() => "");
-        throw new Error(raw || `Server error (${res.status})`);
+        let msg = `Server error (${res.status})`;
+
+        if (raw) {
+          try {
+            const parsed = JSON.parse(raw);
+            msg = parsed.detail || parsed.error || parsed.message || raw;
+          } catch {
+            msg = raw;
+          }
+        }
+
+        throw new Error(msg);
       }
 
       const data = await res.json();
       setResult(data);
     } catch (err) {
-      setError(err.message || "Request failed");
+      if (err instanceof TypeError && err.message === "Failed to fetch") {
+        setError("Cannot reach backend — check API URL or CORS.");
+      } else {
+        setError(err.message || "Request failed");
+      }
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="min-h-screen px-4 py-8">
+    <div className="min-h-screen px-4 py-8 sm:px-6 lg:px-8">
       <div className="max-w-5xl mx-auto space-y-6">
-        <header className="text-center">
-          <h1 className="text-4xl font-bold">
+
+        <header className="text-center mb-2">
+          <h1 className="text-3xl sm:text-4xl font-bold tracking-tight">
             <span className="text-gold">PeakPace</span>{" "}
             <span className="text-text-dim font-light">AI</span>
           </h1>
           <p className="text-text-dim text-sm mt-1">
-            Racing intelligence for UK & Irish horse racing
+            Racing intelligence for UK &amp; Irish horse racing
           </p>
         </header>
 

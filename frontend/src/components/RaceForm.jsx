@@ -33,17 +33,6 @@ export default function RaceForm({ race, onChange }) {
           />
         </Field>
 
-        <Field label="Race Class">
-          <input
-            type="number"
-            min={1}
-            max={7}
-            value={race.race_class}
-            onChange={(e) => set("race_class", Number(e.target.value))}
-            className="input"
-          />
-        </Field>
-
         <Field label="Race Type">
           <select
             value={race.race_type}
