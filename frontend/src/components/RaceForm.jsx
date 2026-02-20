@@ -1,9 +1,10 @@
+// Values must match backend normalize_going() exactly (lowercase, spaces not underscores)
 const GOING_OPTIONS = [
   { value: "heavy", label: "Heavy" },
   { value: "soft", label: "Soft" },
-  { value: "good_to_soft", label: "Good to Soft" },
+  { value: "good to soft", label: "Good to Soft" },
   { value: "good", label: "Good" },
-  { value: "good_to_firm", label: "Good to Firm" },
+  { value: "good to firm", label: "Good to Firm" },
   { value: "firm", label: "Firm" },
   { value: "standard", label: "Standard" },
 ];
