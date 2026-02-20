@@ -1,7 +1,7 @@
 const EMPTY_RUNNER = {
   name: "",
   age: 4,
-  weight_lbs: 130,
+  weight_st: "9-4",
   form: "",
   trainer: "",
   jockey: "",
@@ -45,7 +45,7 @@ export default function RunnerTable({ runners, onChange }) {
               <th className="pb-2 pr-2">#</th>
               <th className="pb-2 pr-2">Name</th>
               <th className="pb-2 pr-2">Age</th>
-              <th className="pb-2 pr-2">Weight</th>
+              <th className="pb-2 pr-2">Weight (st-lb)</th>
               <th className="pb-2 pr-2">Form</th>
               <th className="pb-2 pr-2">Trainer</th>
               <th className="pb-2 pr-2">Jockey</th>
@@ -77,13 +77,10 @@ export default function RunnerTable({ runners, onChange }) {
                 </td>
                 <td className="py-2 pr-2">
                   <input
-                    type="number"
-                    min={100}
-                    max={180}
-                    value={r.weight_lbs}
-                    onChange={(e) =>
-                      update(i, "weight_lbs", Number(e.target.value))
-                    }
+                    type="text"
+                    value={r.weight_st}
+                    onChange={(e) => update(i, "weight_st", e.target.value)}
+                    placeholder="9-0"
                     className="input-compact w-20"
                   />
                 </td>
@@ -174,15 +171,12 @@ export default function RunnerTable({ runners, onChange }) {
                 />
               </label>
               <label className="flex flex-col gap-1">
-                <span className="text-xs text-text-dim">Weight (lbs)</span>
+                <span className="text-xs text-text-dim">Weight (st-lb)</span>
                 <input
-                  type="number"
-                  min={100}
-                  max={180}
-                  value={r.weight_lbs}
-                  onChange={(e) =>
-                    update(i, "weight_lbs", Number(e.target.value))
-                  }
+                  type="text"
+                  value={r.weight_st}
+                  onChange={(e) => update(i, "weight_st", e.target.value)}
+                  placeholder="9-0"
                   className="input"
                 />
               </label>

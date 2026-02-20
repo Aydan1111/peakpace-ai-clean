@@ -17,19 +17,25 @@ const API_BASE =
     "https://peakpace-ai.onrender.com"
   ).replace(/\/+$/, "");
 
+// Convert "9-4" (9 stone 4 lb) to total pounds for backend
+function parseWeightSt(str) {
+  const match = /^(\d+)-(\d+)$/.exec((str || "").trim());
+  if (!match) return 130;
+  return parseInt(match[1], 10) * 14 + parseInt(match[2], 10);
+}
+
 const DEFAULT_RACE = {
   course: "",
   race_type: "flat",
   surface: "aw",
   distance_f: 8,
-  race_class: 4,
   going: "standard",
 };
 
 const DEFAULT_RUNNERS = [
-  { name: "", age: 4, weight_lbs: 130, form: "", trainer: "", jockey: "" },
-  { name: "", age: 4, weight_lbs: 130, form: "", trainer: "", jockey: "" },
-  { name: "", age: 4, weight_lbs: 130, form: "", trainer: "", jockey: "" },
+  { name: "", age: 4, weight_st: "9-4", form: "", trainer: "", jockey: "" },
+  { name: "", age: 4, weight_st: "9-4", form: "", trainer: "", jockey: "" },
+  { name: "", age: 4, weight_st: "9-4", form: "", trainer: "", jockey: "" },
 ];
 
 export default function App() {
@@ -79,7 +85,12 @@ export default function App() {
                   track_config: "standard",
                 },
                 runners: runners.map((r) => ({
-                  ...r,
+                  name: r.name,
+                  age: r.age,
+                  weight_lbs: parseWeightSt(r.weight_st),
+                  form: r.form,
+                  trainer: r.trainer,
+                  jockey: r.jockey,
                   flags: [],
                   headgear: [],
                   jockey_claim_lbs: 0,
