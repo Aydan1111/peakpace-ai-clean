@@ -103,7 +103,6 @@ export default function App() {
   const [race, setRace] = useState(DEFAULT_RACE);
   const [runners, setRunners] = useState(DEFAULT_RUNNERS);
   const [pasteText, setPasteText] = useState("");
-  const [imageFile, setImageFile] = useState(null);
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -115,12 +114,9 @@ export default function App() {
     runners.every((r) => r.name.trim() !== "");
 
   const canSubmitPaste = !loading && pasteText.trim().length > 0;
-  const canSubmitImage = !loading && imageFile != null;
 
   const canSubmit =
-    inputMode === "manual" ? canSubmitManual :
-    inputMode === "paste"  ? canSubmitPaste  :
-                             canSubmitImage;
+    inputMode === "manual" ? canSubmitManual : canSubmitPaste;
 
   const analyze = async () => {
     setLoading(true);
@@ -129,27 +125,7 @@ export default function App() {
 
     try {
       const url =
-        inputMode === "paste"  ? `${API_BASE}/analyze-text`  :
-        inputMode === "image"  ? `${API_BASE}/analyze-image` :
-                                 `${API_BASE}/analyze`;
-
-      // -----------------------------------------------------------------
-      // IMAGE MODE — multipart FormData, no JSON
-      // -----------------------------------------------------------------
-      if (inputMode === "image") {
-        const form = new FormData();
-        form.append("file", imageFile);
-
-        console.log("FINAL PAYLOAD [image]", imageFile.name, imageFile.size, "bytes");
-
-        const res = await fetch(url, { method: "POST", body: form });
-        if (!res.ok) {
-          const raw = await res.text().catch(() => "");
-          throw new Error(extractErrorMsg(raw, res.status));
-        }
-        setResult(await res.json());
-        return;
-      }
+        inputMode === "paste" ? `${API_BASE}/analyze-text` : `${API_BASE}/analyze`;
 
       // -----------------------------------------------------------------
       // JSON MODES — paste and manual
@@ -240,22 +216,6 @@ export default function App() {
           </>
         ) : inputMode === "paste" ? (
           <PasteInput value={pasteText} onChange={setPasteText} />
-        ) : (
-          <section className="bg-surface rounded-xl border border-border p-6">
-            <h2 className="text-lg font-semibold text-gold mb-1">Upload Screenshot</h2>
-            <p className="text-text-dim text-xs mb-4">
-              Upload a screenshot of the racecard — OCR will extract runners automatically.
-            </p>
-            <input
-              type="file"
-              accept="image/*"
-              onChange={(e) => setImageFile(e.target.files?.[0] || null)}
-              className="input text-sm"
-            />
-            {imageFile && (
-              <p className="text-text-dim text-xs mt-2">{imageFile.name}</p>
-            )}
-          </section>
         )}
 
         <div className="flex justify-center">
