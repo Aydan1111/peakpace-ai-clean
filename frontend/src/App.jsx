@@ -178,10 +178,16 @@ export default function App() {
 
       if (!res.ok) {
         const raw = await res.text().catch(() => "");
+        console.error("RESPONSE ERROR", res.status, raw);
         throw new Error(extractErrorMsg(raw, res.status));
       }
 
-      setResult(await res.json());
+      const data = await res.json();
+      console.log("RESPONSE OK", JSON.stringify(data, null, 2));
+      if (!data || (!data.gold_pick && !data.full_rankings)) {
+        throw new Error("Analysis failed \u2013 check backend response");
+      }
+      setResult(data);
     } catch (err) {
       if (err instanceof TypeError && err.message === "Failed to fetch") {
         setError("Cannot reach backend — check API URL or CORS.");

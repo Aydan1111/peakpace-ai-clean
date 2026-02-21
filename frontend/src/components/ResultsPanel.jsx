@@ -25,7 +25,36 @@ const PICK_CONFIG = {
 export default function ResultsPanel({ result }) {
   if (!result) return null;
 
-  const { picks, predictions_table, engine_version, note } = result;
+  // Map backend shape → UI shape
+  const goldName = result.gold_pick?.name;
+  const silverName = result.silver_pick?.name;
+  const darkName = result.dark_horse?.name;
+
+  const picks = [
+    result.gold_pick && { pick: "GOLD", name: goldName, model_alignment: result.gold_pick.confidence },
+    result.silver_pick && { pick: "SILVER", name: silverName, model_alignment: result.silver_pick.confidence },
+    result.dark_horse && darkName !== silverName && { pick: "DARK HORSE", name: darkName, model_alignment: result.dark_horse.confidence },
+  ].filter(Boolean);
+
+  const predictions_table = (result.full_rankings || []).map((r) => {
+    let pick = null;
+    if (r.name === goldName) pick = "GOLD";
+    else if (r.name === silverName) pick = "SILVER";
+    else if (r.name === darkName) pick = "DARK HORSE";
+    return {
+      name: r.name,
+      total_score: r.score,
+      model_alignment: r.confidence,
+      form: r.form || 0,
+      connections: r.connections || 0,
+      structural: r.structural || 0,
+      fitness: r.fitness || 0,
+      pick,
+    };
+  });
+
+  const engine_version = "PeakPace v1";
+  const note = "Scores are model estimates — always verify with your own analysis.";
 
   return (
     <section className="bg-surface rounded-xl border border-border p-6 space-y-6">

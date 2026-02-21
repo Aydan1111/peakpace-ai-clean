@@ -241,7 +241,11 @@ class RacingAICore:
             scored.append({
                 "name": r.name,
                 "score": round(final_score, 3),
-                "confidence": confidence
+                "confidence": confidence,
+                "form": round(form, 3),
+                "connections": round(trainer * jockey * combo, 3),
+                "structural": round(weight, 3),
+                "fitness": round(age, 3),
             })
 
         scored.sort(key=lambda x: x["score"], reverse=True)
