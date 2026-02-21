@@ -4,6 +4,3 @@ pydantic
 numpy
 pandas
 python-multipart
-python-bidi==0.4.2
-easyocr==1.7.2
-opencv-python-headless==4.10.0.84

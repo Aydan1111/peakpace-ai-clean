@@ -1,10 +1,8 @@
-from fastapi import FastAPI, HTTPException, UploadFile, File
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional
 import re
-import tempfile
-import easyocr
 from racing_ai_core import RacingAICore, RaceInfo, Runner
 
 app = FastAPI(title="PeakPace AI")
@@ -18,9 +16,6 @@ app.add_middleware(
 )
 
 engine = RacingAICore()
-
-# OCR reader — initialised once at startup (downloads model on first run)
-ocr_reader = easyocr.Reader(["en"])
 
 
 # -------------------------------------------------
@@ -111,7 +106,6 @@ class AnalyzeTextRequest(BaseModel):
 
 # -------------------------------------------------
 # SHARED TEXT PARSER
-# Reused by /analyze-text and /analyze-image
 # -------------------------------------------------
 
 FIELD_KEYS = re.compile(
@@ -332,64 +326,3 @@ def debug_parse(request: DebugParseRequest):
         "runners_clean": cleaned,
         "count": len(cleaned),
     }
-
-
-# -------------------------------------------------
-# ANALYZE IMAGE (SCREENSHOT MODE)
-# -------------------------------------------------
-
-@app.post("/analyze-image")
-async def analyze_image(file: UploadFile = File(...)):
-    """
-    Upload a screenshot → OCR → shared racecard parser → analyze.
-    Reuses parse_racecard_text() — no duplicate parsing logic.
-    """
-    try:
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmp:
-            tmp.write(await file.read())
-            path = tmp.name
-
-        text_lines = ocr_reader.readtext(path, detail=0)
-        extracted_text = "\n".join(text_lines)
-
-        runners = parse_racecard_text(extracted_text)
-
-        if len(runners) < 2:
-            ocr_preview = extracted_text[:1000]
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    f"OCR found {len(runners)} runner(s). Need at least 2. "
-                    f"Try a clearer screenshot.\n\n"
-                    f"--- OCR text (first 1000 chars) ---\n{ocr_preview}"
-                ),
-            )
-
-        race = RaceInfo(
-            course="Unknown",
-            country="UK",
-            race_type="flat",
-            surface="aw",
-            distance_f=8,
-            going="good",
-            runners=len(runners),
-        )
-
-        runner_objects = [
-            Runner(
-                name=r["name"],
-                age=r["age"],
-                weight_lbs=parse_weight_to_lbs(r["weight"]),
-                form=r["form"],
-                trainer=r["trainer"],
-                jockey=r["jockey"],
-            )
-            for r in runners
-        ]
-
-        return engine.analyze(race, runner_objects)
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
