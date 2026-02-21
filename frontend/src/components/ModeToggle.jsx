@@ -14,12 +14,7 @@ export default function ModeToggle({ mode, onChange }) {
         >
           Paste Text
         </ToggleButton>
-        <ToggleButton
-          active={mode === "image"}
-          onClick={() => onChange("image")}
-        >
-          Screenshot
-        </ToggleButton>
+
       </div>
     </div>
   );
