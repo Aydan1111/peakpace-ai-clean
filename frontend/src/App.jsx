@@ -214,7 +214,7 @@ export default function App() {
             <RaceForm race={race} onChange={setRace} />
             <RunnerTable runners={runners} onChange={setRunners} />
           </>
-        ) : inputMode === "paste" ? (
+        ) : (
           <PasteInput value={pasteText} onChange={setPasteText} />
         )}
 
