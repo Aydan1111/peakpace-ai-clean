@@ -506,17 +506,33 @@ class RacingAICore:
         elif len(scored) == 1:
             race_confidence = "MEDIUM"
 
-        # Picks with labels
+        # Picks — strictly by ranking position (0 = gold, 1 = silver)
         gold = {**scored[0], "label": "Good E/W Bet"} if scored else None
         silver = {**scored[1], "label": "Good Place Bet"} if len(scored) > 1 else None
 
-        # Dark horse: lowest-scored runner distinct from silver
+        gold_name   = scored[0]["name"] if scored else None
+        silver_name = scored[1]["name"] if len(scored) > 1 else None
+
+        # Dark horse: lowest-scored runner that is neither gold nor silver
         dark = None
-        if scored:
-            for candidate in reversed(scored):
-                if silver is None or candidate["name"] != silver["name"]:
-                    dark = {**candidate, "label": "Value Play"}
-                    break
+        for candidate in reversed(scored):
+            if candidate["name"] != gold_name and candidate["name"] != silver_name:
+                dark = {**candidate, "label": "Value Play"}
+                break
+
+        dark_name = dark["name"] if dark else None
+
+        # Embed position-based labels into full_rankings so the UI
+        # can read them directly without any score-threshold logic
+        for i, entry in enumerate(scored):
+            if i == 0:
+                entry["label"] = "Good E/W Bet"
+            elif i == 1:
+                entry["label"] = "Good Place Bet"
+            elif entry["name"] == dark_name:
+                entry["label"] = "Value Play"
+            else:
+                entry["label"] = ""
 
         return {
             "gold_pick":       gold,
