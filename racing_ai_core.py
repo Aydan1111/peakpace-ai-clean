@@ -125,31 +125,54 @@ def _win_rate_to_multiplier(wins: int, runs: int) -> float:
     return round(min(raw, 1.12), 4)
 
 
-def _build_people_multipliers(*filenames: str) -> Dict[str, float]:
-    """Build a combined name→multiplier dict from one or more stats files.
-
-    If a name appears in multiple files, take the higher multiplier.
-    """
+def _build_people_multipliers(filename: str) -> Dict[str, float]:
+    """Build a name→multiplier dict from a single stats file."""
     combined = {}
-    for fn in filenames:
-        data = _parse_stats_file(fn)
-        for name, d in data.items():
-            m = _win_rate_to_multiplier(d["wins"], d["runs"])
-            combined[name] = max(combined.get(name, 1.0), m)
+    data = _parse_stats_file(filename)
+    for name, d in data.items():
+        m = _win_rate_to_multiplier(d["wins"], d["runs"])
+        combined[name] = max(combined.get(name, 1.0), m)
     return combined
 
 
-# Load at module level — runs once at import time
-_TRAINER_DATA: Dict[str, float] = _build_people_multipliers(
+# ============================================================
+# RACE-TYPE CLASSIFIER — used by all lookup methods
+# ============================================================
+
+_NH_KEYWORDS = ("hurdle", "chase", "nh", "national hunt", "national_hunt",
+                "jump", "bumper", "steeplechase", "hunter chase",
+                "cross country", "point-to-point")
+
+
+def _is_nh(race_type: str) -> bool:
+    """Return True when race_type indicates National Hunt / Jumps."""
+    if not race_type:
+        return False
+    rt = race_type.lower()
+    return any(k in rt for k in _NH_KEYWORDS)
+
+
+# ============================================================
+# DATA LOADING — explicit Flat vs National Hunt separation
+# ============================================================
+
+# Trainers
+_TRAINER_DATA_FLAT: Dict[str, float] = _build_people_multipliers(
     "Irish Trainers Stats Flat 2025 and 2026.txt",
+)
+_TRAINER_DATA_NH: Dict[str, float] = _build_people_multipliers(
     "Irish Trainers Stats National Hunt 2025 and 2026.txt",
 )
 
-_JOCKEY_DATA: Dict[str, float] = _build_people_multipliers(
+# Jockeys
+_JOCKEY_DATA_FLAT: Dict[str, float] = _build_people_multipliers(
     "Irish Jockeys Stats Flat 2025.txt",
+)
+_JOCKEY_DATA_NH: Dict[str, float] = _build_people_multipliers(
     "Irish Jockeys Stats National Hunt 2025 and 2026.txt",
 )
 
+# Horse ratings
 _HORSE_RATINGS_FLAT: Dict[str, int] = _parse_ratings_file(
     "Irish Horses Flat Ratings - Engine Format.txt"
 )
@@ -157,6 +180,7 @@ _HORSE_RATINGS_NH: Dict[str, int] = _parse_ratings_file(
     "Irish Horses National Hunt Ratings - Engine Format.txt"
 )
 
+# Horse performance stats
 _HORSE_STATS_FLAT: Dict[str, dict] = _parse_stats_file("Irish Horses Flat 2025.txt")
 _HORSE_STATS_NH: Dict[str, dict] = _parse_stats_file(
     "Irish Horses National Hunt 2025 and 2026.txt"
@@ -259,15 +283,16 @@ class RacingAICore:
     # --------------------------------------------------------
     # TRAINER POWER
     # --------------------------------------------------------
-    def trainer_style_boost(self, trainer: str) -> float:
+    def trainer_style_boost(self, trainer: str, race_type: str = "") -> float:
         t = trainer.lower().strip()
+        data = _TRAINER_DATA_NH if _is_nh(race_type) else _TRAINER_DATA_FLAT
 
-        # 1. Exact match in Irish data
-        if t in _TRAINER_DATA:
-            return _TRAINER_DATA[t]
+        # 1. Exact match in race-type-specific Irish data
+        if t in data:
+            return data[t]
 
-        # 2. Partial match in Irish data
-        for name, boost in _TRAINER_DATA.items():
+        # 2. Partial match in race-type-specific Irish data
+        for name, boost in data.items():
             if name in t or t in name:
                 return boost
 
@@ -285,15 +310,16 @@ class RacingAICore:
     # --------------------------------------------------------
     # JOCKEY STRENGTH
     # --------------------------------------------------------
-    def jockey_boost(self, jockey: str) -> float:
+    def jockey_boost(self, jockey: str, race_type: str = "") -> float:
         j = jockey.lower().strip()
+        data = _JOCKEY_DATA_NH if _is_nh(race_type) else _JOCKEY_DATA_FLAT
 
-        # 1. Exact match in Irish data
-        if j in _JOCKEY_DATA:
-            return _JOCKEY_DATA[j]
+        # 1. Exact match in race-type-specific Irish data
+        if j in data:
+            return data[j]
 
-        # 2. Partial match in Irish data
-        for name, boost in _JOCKEY_DATA.items():
+        # 2. Partial match in race-type-specific Irish data
+        for name, boost in data.items():
             if name in j or j in name:
                 return boost
 
@@ -325,19 +351,14 @@ class RacingAICore:
 
         Flat ratings (100-126): max +8%.
         NH ratings (140-164): max +8%.
+        Uses only the dataset that matches the race type.
         """
         name = horse_name.lower().strip()
-        rating: Optional[int] = None
 
-        nh_keywords = ("hurdle", "chase", "nh", "national hunt", "jump", "bumper")
-        is_nh = race_type and any(k in race_type.lower() for k in nh_keywords)
-
-        if is_nh:
+        if _is_nh(race_type):
             rating = _HORSE_RATINGS_NH.get(name)
-        if rating is None:
+        else:
             rating = _HORSE_RATINGS_FLAT.get(name)
-        if rating is None:
-            rating = _HORSE_RATINGS_NH.get(name)
 
         if rating is None:
             return 1.0
@@ -354,10 +375,13 @@ class RacingAICore:
     # --------------------------------------------------------
     # HORSE PERFORMANCE BOOST
     # --------------------------------------------------------
-    def horse_performance_boost(self, horse_name: str) -> float:
+    def horse_performance_boost(self, horse_name: str, race_type: str = "") -> float:
         """Derive a multiplier from the horse's own win-rate in stats files."""
         name = horse_name.lower().strip()
-        stats = _HORSE_STATS_FLAT.get(name) or _HORSE_STATS_NH.get(name)
+        if _is_nh(race_type):
+            stats = _HORSE_STATS_NH.get(name)
+        else:
+            stats = _HORSE_STATS_FLAT.get(name)
         if not stats:
             return 1.0
         return _win_rate_to_multiplier(stats["wins"], stats["runs"])
@@ -399,45 +423,53 @@ class RacingAICore:
     # --------------------------------------------------------
     # CONFIDENCE DEDUCTION FOR MISSING DATA
     # --------------------------------------------------------
-    def _confidence_deduction(self, trainer: str, jockey: str, horse_name: str) -> int:
+    def _confidence_deduction(self, trainer: str, jockey: str,
+                              horse_name: str, race_type: str = "") -> int:
         """Return confidence points to deduct when historical data is absent.
 
         Missing trainer in all sources  → -3 points
         Missing jockey in all sources   → -3 points
-        Horse absent from both rating
-          files AND both stats files    → -2 points
+        Horse absent from the race-type-
+          specific rating AND stats file → -2 points
 
         Maximum total deduction: 8 points.
         The score itself is never altered; only confidence is reduced.
         """
         deduction = 0
+        is_nh = _is_nh(race_type)
 
+        trainer_data = _TRAINER_DATA_NH if is_nh else _TRAINER_DATA_FLAT
         t = trainer.lower().strip()
         trainer_found = (
-            t in _TRAINER_DATA
-            or any(n in t or t in n for n in _TRAINER_DATA)
+            t in trainer_data
+            or any(n in t or t in n for n in trainer_data)
             or t in _UK_TRAINER_FALLBACK
             or any(n in t or t in n for n in _UK_TRAINER_FALLBACK)
         )
         if not trainer_found:
             deduction += 3
 
+        jockey_data = _JOCKEY_DATA_NH if is_nh else _JOCKEY_DATA_FLAT
         j = jockey.lower().strip()
         jockey_found = (
-            j in _JOCKEY_DATA
-            or any(n in j or j in n for n in _JOCKEY_DATA)
+            j in jockey_data
+            or any(n in j or j in n for n in jockey_data)
             or any(n in j for n in _UK_JOCKEY_FALLBACK)
         )
         if not jockey_found:
             deduction += 3
 
         name = horse_name.lower().strip()
-        horse_has_data = (
-            _HORSE_RATINGS_FLAT.get(name) is not None
-            or _HORSE_RATINGS_NH.get(name) is not None
-            or _HORSE_STATS_FLAT.get(name) is not None
-            or _HORSE_STATS_NH.get(name) is not None
-        )
+        if is_nh:
+            horse_has_data = (
+                _HORSE_RATINGS_NH.get(name) is not None
+                or _HORSE_STATS_NH.get(name) is not None
+            )
+        else:
+            horse_has_data = (
+                _HORSE_RATINGS_FLAT.get(name) is not None
+                or _HORSE_STATS_FLAT.get(name) is not None
+            )
         if not horse_has_data:
             deduction += 2
 
@@ -458,11 +490,11 @@ class RacingAICore:
             weight  = self.weight_score(r)
             age     = self.age_score(r.age)
 
-            trainer = self.trainer_style_boost(r.trainer)
-            jockey  = self.jockey_boost(r.jockey)
+            trainer = self.trainer_style_boost(r.trainer, race.race_type)
+            jockey  = self.jockey_boost(r.jockey, race.race_type)
             combo   = self.combo_boost(r.trainer, r.jockey)
             rating  = self.horse_rating_boost(r.name, race.race_type)
-            perf    = self.horse_performance_boost(r.name)
+            perf    = self.horse_performance_boost(r.name, race.race_type)
 
             final_score = (
                 base   * 0.25 +
@@ -480,7 +512,8 @@ class RacingAICore:
             # Clamp confidence to 70–95%.
             # Reduce slightly when trainer, jockey, or horse data is absent —
             # the score is unchanged; we simply lower certainty.
-            conf_deduction = self._confidence_deduction(r.trainer, r.jockey, r.name)
+            conf_deduction = self._confidence_deduction(
+                r.trainer, r.jockey, r.name, race.race_type)
             confidence = min(95, max(70, int(final_score * 80) - conf_deduction))
 
             scored.append({

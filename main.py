@@ -249,11 +249,33 @@ def analyze(request: AnalyzeRequest):
 
 
 # -------------------------------------------------
+# RACE TYPE AUTO-DETECTION (paste text only)
+# -------------------------------------------------
+
+_NH_DETECT = re.compile(
+    r"hurdle|chase|steeplechase|novice\s+hurdle|novice\s+chase"
+    r"|beginners?\s+chase|bumper|nh\s+flat|national\s+hunt"
+    r"|hunter\s+chase|cross\s+country|point-to-point",
+    re.I,
+)
+
+
+def detect_race_type(text: str) -> str:
+    """Classify pasted racecard text as national_hunt or flat."""
+    if _NH_DETECT.search(text):
+        return "national_hunt"
+    return "flat"
+
+
+# -------------------------------------------------
 # ANALYZE TEXT (PASTE MODE)
 # -------------------------------------------------
 
 @app.post("/analyze-text")
 def analyze_text(request: AnalyzeTextRequest):
+    # Auto-detect race type from the pasted text
+    detected_type = detect_race_type(request.racecard_text)
+
     runners = parse_racecard_text(request.racecard_text)
 
     if len(runners) < 2:
@@ -266,7 +288,7 @@ def analyze_text(request: AnalyzeTextRequest):
     race = RaceInfo(
         course=ri.course,
         country=ri.country,
-        race_type=ri.race_type,
+        race_type=detected_type,
         surface=ri.surface,
         distance_f=parse_distance_to_furlongs(ri.distance),
         going=normalize_going(ri.going),
