@@ -31,9 +31,9 @@ export default function ResultsPanel({ result }) {
   const darkName = result.dark_horse?.name;
 
   const picks = [
-    result.gold_pick && { pick: "GOLD", name: goldName, model_alignment: result.gold_pick.confidence },
-    result.silver_pick && { pick: "SILVER", name: silverName, model_alignment: result.silver_pick.confidence },
-    result.dark_horse && darkName !== silverName && { pick: "DARK HORSE", name: darkName, model_alignment: result.dark_horse.confidence },
+    result.gold_pick && { pick: "GOLD", name: goldName, model_alignment: result.gold_pick.confidence, why: result.gold_pick.label },
+    result.silver_pick && { pick: "SILVER", name: silverName, model_alignment: result.silver_pick.confidence, why: result.silver_pick.label },
+    result.dark_horse && darkName !== silverName && { pick: "DARK HORSE", name: darkName, model_alignment: result.dark_horse.confidence, why: result.dark_horse.label },
   ].filter(Boolean);
 
   const predictions_table = (result.full_rankings || []).map((r) => {
@@ -55,10 +55,23 @@ export default function ResultsPanel({ result }) {
 
   const engine_version = "PeakPace v1";
   const note = "Scores are model estimates — always verify with your own analysis.";
+  const raceConf = result.race_confidence || null;
+  const confStyle = raceConf === "HIGH"
+    ? "bg-green-500/20 text-green-300 border-green-500/40"
+    : raceConf === "MEDIUM"
+    ? "bg-yellow-500/20 text-yellow-300 border-yellow-500/40"
+    : "bg-gray-500/20 text-gray-300 border-gray-500/40";
 
   return (
     <section className="bg-surface rounded-xl border border-border p-6 space-y-6">
-      <h2 className="text-lg font-semibold text-gold">Analysis Results</h2>
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <h2 className="text-lg font-semibold text-gold">Analysis Results</h2>
+        {raceConf && (
+          <span className={`text-xs font-bold uppercase tracking-wider px-2 py-1 rounded border ${confStyle}`}>
+            {raceConf} Confidence
+          </span>
+        )}
+      </div>
 
       {/* Top Picks */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
