@@ -397,6 +397,53 @@ class RacingAICore:
         return 1.0
 
     # --------------------------------------------------------
+    # CONFIDENCE DEDUCTION FOR MISSING DATA
+    # --------------------------------------------------------
+    def _confidence_deduction(self, trainer: str, jockey: str, horse_name: str) -> int:
+        """Return confidence points to deduct when historical data is absent.
+
+        Missing trainer in all sources  → -3 points
+        Missing jockey in all sources   → -3 points
+        Horse absent from both rating
+          files AND both stats files    → -2 points
+
+        Maximum total deduction: 8 points.
+        The score itself is never altered; only confidence is reduced.
+        """
+        deduction = 0
+
+        t = trainer.lower().strip()
+        trainer_found = (
+            t in _TRAINER_DATA
+            or any(n in t or t in n for n in _TRAINER_DATA)
+            or t in _UK_TRAINER_FALLBACK
+            or any(n in t or t in n for n in _UK_TRAINER_FALLBACK)
+        )
+        if not trainer_found:
+            deduction += 3
+
+        j = jockey.lower().strip()
+        jockey_found = (
+            j in _JOCKEY_DATA
+            or any(n in j or j in n for n in _JOCKEY_DATA)
+            or any(n in j for n in _UK_JOCKEY_FALLBACK)
+        )
+        if not jockey_found:
+            deduction += 3
+
+        name = horse_name.lower().strip()
+        horse_has_data = (
+            _HORSE_RATINGS_FLAT.get(name) is not None
+            or _HORSE_RATINGS_NH.get(name) is not None
+            or _HORSE_STATS_FLAT.get(name) is not None
+            or _HORSE_STATS_NH.get(name) is not None
+        )
+        if not horse_has_data:
+            deduction += 2
+
+        return deduction
+
+    # --------------------------------------------------------
     # MAIN ANALYSIS
     # --------------------------------------------------------
     def analyze(self, race: RaceInfo, runners: List[Runner]):
@@ -430,8 +477,11 @@ class RacingAICore:
             final_score *= rating
             final_score *= perf
 
-            # Clamp confidence to 70–95%
-            confidence = min(95, max(70, int(final_score * 80)))
+            # Clamp confidence to 70–95%.
+            # Reduce slightly when trainer, jockey, or horse data is absent —
+            # the score is unchanged; we simply lower certainty.
+            conf_deduction = self._confidence_deduction(r.trainer, r.jockey, r.name)
+            confidence = min(95, max(70, int(final_score * 80) - conf_deduction))
 
             scored.append({
                 "name":        r.name,
