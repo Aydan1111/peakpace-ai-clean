@@ -112,6 +112,10 @@ FIELD_KEYS = re.compile(
     r"(Age|Weight|Trainer|Jockey|Form|F)\s*:", re.I
 )
 
+# Words that can appear directly before a field key but are NOT horse names.
+# e.g. "Recent Form: 123" — "Recent" must not become a runner.
+_LABEL_NOISE = frozenset({"recent", "last", "previous", "latest", "current"})
+
 
 def _extract_fields(current: dict, text: str):
     """Pull Age/Weight/Trainer/Jockey/Form from a text fragment.
@@ -165,9 +169,9 @@ def parse_racecard_text(text: str) -> list:
         first_field = FIELD_KEYS.search(line)
 
         if first_field and first_field.start() > 0:
-            # Text before first field key = horse name
+            # Text before first field key = horse name (unless it's a known label word)
             name_part = line[:first_field.start()].strip()
-            if name_part:
+            if name_part and name_part.lower() not in _LABEL_NOISE:
                 if current and "name" in current:
                     runners.append(current)
                 current = {"name": name_part}
