@@ -249,7 +249,7 @@ def analyze(request: AnalyzeRequest):
 
 
 # -------------------------------------------------
-# RACE TYPE AUTO-DETECTION (paste text only)
+# RACE TYPE + COUNTRY AUTO-DETECTION (paste text only)
 # -------------------------------------------------
 
 _NH_DETECT = re.compile(
@@ -259,6 +259,14 @@ _NH_DETECT = re.compile(
     re.I,
 )
 
+_IRISH_COURSES = frozenset({
+    "leopardstown", "fairyhouse", "punchestown", "curragh", "the curragh",
+    "galway", "cork", "limerick", "naas", "navan", "dundalk",
+    "tipperary", "gowran park", "killarney", "sligo", "tramore",
+    "wexford", "ballinrobe", "bellewstown", "clonmel", "downpatrick",
+    "kilbeggan", "laytown", "listowel", "roscommon", "thurles",
+})
+
 
 def detect_race_type(text: str) -> str:
     """Classify pasted racecard text as national_hunt or flat."""
@@ -267,14 +275,30 @@ def detect_race_type(text: str) -> str:
     return "flat"
 
 
+def detect_country(text: str) -> str:
+    """Detect country (ireland / uk) from pasted racecard text.
+
+    Scans for known Irish course names and keywords.
+    Defaults to 'uk' when no Irish indicators are found.
+    """
+    t = text.lower()
+    if "ireland" in t or "irish" in t:
+        return "ireland"
+    for course in _IRISH_COURSES:
+        if course in t:
+            return "ireland"
+    return "uk"
+
+
 # -------------------------------------------------
 # ANALYZE TEXT (PASTE MODE)
 # -------------------------------------------------
 
 @app.post("/analyze-text")
 def analyze_text(request: AnalyzeTextRequest):
-    # Auto-detect race type from the pasted text
+    # Auto-detect race type and country from the pasted text
     detected_type = detect_race_type(request.racecard_text)
+    detected_country = detect_country(request.racecard_text)
 
     runners = parse_racecard_text(request.racecard_text)
 
@@ -287,7 +311,7 @@ def analyze_text(request: AnalyzeTextRequest):
     ri = request.race_info
     race = RaceInfo(
         course=ri.course,
-        country=ri.country,
+        country=detected_country,
         race_type=detected_type,
         surface=ri.surface,
         distance_f=parse_distance_to_furlongs(ri.distance),
