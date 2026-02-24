@@ -290,15 +290,46 @@ def detect_country(text: str) -> str:
     return "uk"
 
 
+# Ordered longest-first so multi-word phrases match before single words
+_GOING_MAP = [
+    ("soft to heavy",    "heavy"),
+    ("yielding to soft", "soft"),
+    ("good to soft",     "good to soft"),
+    ("good to yielding", "good to soft"),
+    ("good to firm",     "good to firm"),
+    ("heavy",            "heavy"),
+    ("testing",          "heavy"),
+    ("yielding",         "soft"),
+    ("soft",             "soft"),
+    ("firm",             "firm"),
+    ("standard",         "standard"),
+    ("good",             "good"),
+]
+
+
+def detect_going(text: str) -> Optional[str]:
+    """Extract going condition from pasted racecard text.
+
+    Maps phrases like 'yielding' → 'soft' so the result always satisfies
+    normalize_going().  Returns None when nothing is detected.
+    """
+    t = text.lower()
+    for keyword, canonical in _GOING_MAP:
+        if keyword in t:
+            return canonical
+    return None
+
+
 # -------------------------------------------------
 # ANALYZE TEXT (PASTE MODE)
 # -------------------------------------------------
 
 @app.post("/analyze-text")
 def analyze_text(request: AnalyzeTextRequest):
-    # Auto-detect race type and country from the pasted text
-    detected_type = detect_race_type(request.racecard_text)
+    # Auto-detect race type, country, and going from the pasted text
+    detected_type    = detect_race_type(request.racecard_text)
     detected_country = detect_country(request.racecard_text)
+    detected_going   = detect_going(request.racecard_text)
 
     runners = parse_racecard_text(request.racecard_text)
 
@@ -309,13 +340,15 @@ def analyze_text(request: AnalyzeTextRequest):
         )
 
     ri = request.race_info
+    # Use detected going when found; fall back to what the user supplied
+    going_str = detected_going if detected_going is not None else ri.going
     race = RaceInfo(
         course=ri.course,
         country=detected_country,
         race_type=detected_type,
         surface=ri.surface,
         distance_f=parse_distance_to_furlongs(ri.distance),
-        going=normalize_going(ri.going),
+        going=normalize_going(going_str),
         runners=len(runners),
     )
 

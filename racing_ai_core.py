@@ -143,6 +143,9 @@ _NH_KEYWORDS = ("hurdle", "chase", "nh", "national hunt", "national_hunt",
                 "jump", "bumper", "steeplechase", "hunter chase",
                 "cross country", "point-to-point")
 
+# Going conditions considered testing (used for going confidence penalty)
+_TESTING_GOING = frozenset({"heavy", "soft", "good to soft"})
+
 
 def _is_nh(race_type: str) -> bool:
     """Return True when race_type indicates National Hunt / Jumps."""
@@ -560,51 +563,139 @@ class RacingAICore:
     # AI PICK WRITEUP
     # --------------------------------------------------------
     @staticmethod
-    def _build_writeup(form: float, connections: float,
-                       structural: float, fitness: float,
-                       rating_boost: float, perf_boost: float) -> str:
-        """Generate a brief Racing Post-style writeup from scoring factors."""
-        parts = []
+    def _build_writeup(
+        form: float,
+        trainer_b: float, jockey_b: float, combo_b: float,
+        structural: float, fitness: float,
+        rating_boost: float, perf_boost: float,
+        conf_deduction: int = 0,
+        going_penalty: int = 0,
+    ) -> str:
+        """Generate a 1–2 sentence Racing Post-style writeup from scoring factors.
 
+        Sentence 1 — strongest positive reasons (up to 2 factors).
+        Sentence 2 — uncertainty caveat when confidence was reduced.
+        Score and ranking are never referenced; only analytical factors.
+        """
+        strengths = []
+
+        # Form
         if form >= 0.95:
-            parts.append("strong recent form")
+            strengths.append("strong recent form")
         elif form >= 0.75:
-            parts.append("solid form figures")
-        elif form < 0.55:
-            parts.append("form is a concern")
+            strengths.append("solid form figures")
 
-        if rating_boost >= 1.04:
-            parts.append("high official rating")
+        # Official rating
+        if rating_boost >= 1.05:
+            strengths.append("high official rating")
         elif rating_boost >= 1.02:
-            parts.append("solid rating")
+            strengths.append("solid official rating")
 
-        if connections >= 1.06:
-            parts.append("top trainer/jockey combination")
-        elif connections >= 1.03:
-            parts.append("positive connections")
+        # Connections — most specific descriptor first
+        if combo_b > 1.0:
+            strengths.append("proven trainer/jockey partnership")
+        elif trainer_b >= 1.07:
+            strengths.append("in-form training operation")
+        elif jockey_b >= 1.06:
+            strengths.append("top jockey booking")
+        elif trainer_b >= 1.04 or jockey_b >= 1.04:
+            strengths.append("positive connections")
 
-        if perf_boost >= 1.04:
-            parts.append("proven track record")
+        # Historical performance
+        if perf_boost >= 1.05:
+            strengths.append("strong winning record")
         elif perf_boost >= 1.02:
-            parts.append("decent win record")
+            strengths.append("decent win rate")
 
-        if structural >= 1.05:
-            parts.append("weight advantage")
-        elif structural <= 0.82:
-            parts.append("burdened by weight")
+        # Weight / structural
+        if structural >= 1.08:
+            strengths.append("favourable weight")
 
+        # Age / fitness
         if fitness >= 1.04:
-            parts.append("prime age profile")
+            strengths.append("prime age profile")
 
-        if not parts:
-            return "Limited historical data available for assessment."
+        # Fallback concerns (used only when no strengths)
+        weight_concern = structural <= 0.82
+        form_concern = form < 0.50
 
-        if len(parts) == 1:
-            return parts[0].capitalize() + "."
-        if len(parts) == 2:
-            return parts[0].capitalize() + " and " + parts[1] + "."
-        return (parts[0].capitalize() + " with " + parts[1]
-                + " and " + parts[2] + ".")
+        # --- Sentence 1: primary assessment ---
+        if strengths:
+            top = strengths[:2]
+            if len(top) == 1:
+                sentence1 = top[0].capitalize() + "."
+            else:
+                sentence1 = (top[0].capitalize() + " alongside "
+                             + top[1] + ".")
+        elif weight_concern:
+            sentence1 = "Carries a significant weight burden."
+        elif form_concern:
+            sentence1 = "Recent form figures are a concern."
+        else:
+            sentence1 = "Limited historical data available for assessment."
+
+        # --- Sentence 2: uncertainty caveats ---
+        unc_parts = []
+        if conf_deduction >= 5:
+            unc_parts.append("Confidence notably reduced due to limited profile data")
+        elif conf_deduction >= 2:
+            unc_parts.append("Confidence slightly reduced due to limited profile data")
+        if going_penalty > 0:
+            unc_parts.append("testing ground adds further uncertainty")
+
+        if unc_parts:
+            unc = unc_parts[0]
+            if len(unc_parts) > 1:
+                unc += "; " + unc_parts[1]
+            return sentence1 + " " + unc + "."
+
+        # Minor concern note when no uncertainty sentence but weight/form issues
+        if weight_concern and strengths:
+            return sentence1 + " Weight burden may be a factor."
+        if form_concern and strengths:
+            return sentence1 + " Form is worth monitoring."
+
+        return sentence1
+
+    # --------------------------------------------------------
+    # GOING / GROUND CONFIDENCE PENALTY
+    # --------------------------------------------------------
+    def _going_penalty(self, runner: Runner, going: str,
+                       race_type: str = "", country: str = "") -> int:
+        """Small confidence deduction when going is testing (soft/heavy/good-to-soft).
+
+        Does NOT touch score or ranking — confidence only.
+        Deductions (max combined 2):
+          +1  horse has fewer than 8 career runs (inexperience on testing ground)
+               OR has no historical stats at all
+          +1  horse carries more than 138 lbs net (heavy burden harder on soft)
+        """
+        if going.lower().strip() not in _TESTING_GOING:
+            return 0
+
+        penalty = 0
+        name = runner.name.lower().strip()
+        uk = _is_uk(country)
+        is_nh_flag = _is_nh(race_type)
+
+        # Look up career run count from stats files
+        if uk:
+            stats = (_UK_HORSE_STATS_NH if is_nh_flag
+                     else _UK_HORSE_STATS_FLAT).get(name)
+        else:
+            stats = (_HORSE_STATS_NH if is_nh_flag
+                     else _HORSE_STATS_FLAT).get(name)
+
+        # No data at all, or very few career runs → uncertain on testing ground
+        if stats is None or stats["runs"] < 8:
+            penalty += 1
+
+        # High net weight is a greater physical burden on soft/heavy ground
+        net_weight = runner.weight_lbs - runner.jockey_claim_lbs
+        if net_weight > 138:
+            penalty += 1
+
+        return min(penalty, 2)
 
     # --------------------------------------------------------
     # MAIN ANALYSIS
@@ -649,7 +740,10 @@ class RacingAICore:
             # the score is unchanged; we simply lower certainty.
             conf_deduction = self._confidence_deduction(
                 r.trainer, r.jockey, r.name, race.race_type, race.country)
-            confidence = min(95, max(70, int(final_score * 80) - conf_deduction))
+            going_pen = self._going_penalty(r, race.going, race.race_type,
+                                            race.country)
+            confidence = min(95, max(70, int(final_score * 80)
+                                     - conf_deduction - going_pen))
 
             conn = round(trainer * jockey * combo, 3)
             scored.append({
@@ -663,6 +757,11 @@ class RacingAICore:
                 # Temporary — used for writeups, stripped before return
                 "_rating_b":   rating,
                 "_perf_b":     perf,
+                "_trainer_b":  trainer,
+                "_jockey_b":   jockey,
+                "_combo_b":    combo,
+                "_conf_ded":   conf_deduction,
+                "_going_pen":  going_pen,
             })
 
         scored.sort(key=lambda x: x["score"], reverse=True)
@@ -681,8 +780,11 @@ class RacingAICore:
         # Helper to build a writeup from a scored entry
         def _wp(entry):
             return self._build_writeup(
-                entry["form"], entry["connections"], entry["structural"],
-                entry["fitness"], entry["_rating_b"], entry["_perf_b"],
+                entry["form"],
+                entry["_trainer_b"], entry["_jockey_b"], entry["_combo_b"],
+                entry["structural"], entry["fitness"],
+                entry["_rating_b"], entry["_perf_b"],
+                entry["_conf_ded"], entry["_going_pen"],
             )
 
         # Picks — strictly by ranking position (0 = gold, 1 = silver)
@@ -706,10 +808,12 @@ class RacingAICore:
 
         # Embed position-based labels into full_rankings so the UI
         # can read them directly without any score-threshold logic.
-        # Strip temporary writeup-helper fields from all entries.
+        # Strip all temporary writeup-helper fields from every entry.
+        _temp = ("_rating_b", "_perf_b", "_trainer_b", "_jockey_b",
+                 "_combo_b", "_conf_ded", "_going_pen")
         for i, entry in enumerate(scored):
-            entry.pop("_rating_b", None)
-            entry.pop("_perf_b", None)
+            for f in _temp:
+                entry.pop(f, None)
             if i == 0:
                 entry["label"] = "Good E/W Bet"
             elif i == 1:
@@ -722,8 +826,8 @@ class RacingAICore:
         # Strip temp fields from picks too (they were spread-copied)
         for pick in (gold, silver, dark):
             if pick:
-                pick.pop("_rating_b", None)
-                pick.pop("_perf_b", None)
+                for f in _temp:
+                    pick.pop(f, None)
 
         return {
             "gold_pick":       gold,
