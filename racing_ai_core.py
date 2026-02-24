@@ -156,7 +156,7 @@ def _is_nh(race_type: str) -> bool:
 # DATA LOADING — explicit Flat vs National Hunt separation
 # ============================================================
 
-# Trainers
+# ---------- IRISH ----------
 _TRAINER_DATA_FLAT: Dict[str, float] = _build_people_multipliers(
     "Irish Trainers Stats Flat 2025 and 2026.txt",
 )
@@ -164,7 +164,6 @@ _TRAINER_DATA_NH: Dict[str, float] = _build_people_multipliers(
     "Irish Trainers Stats National Hunt 2025 and 2026.txt",
 )
 
-# Jockeys
 _JOCKEY_DATA_FLAT: Dict[str, float] = _build_people_multipliers(
     "Irish Jockeys Stats Flat 2025.txt",
 )
@@ -172,7 +171,6 @@ _JOCKEY_DATA_NH: Dict[str, float] = _build_people_multipliers(
     "Irish Jockeys Stats National Hunt 2025 and 2026.txt",
 )
 
-# Horse ratings
 _HORSE_RATINGS_FLAT: Dict[str, int] = _parse_ratings_file(
     "Irish Horses Flat Ratings - Engine Format.txt"
 )
@@ -180,11 +178,54 @@ _HORSE_RATINGS_NH: Dict[str, int] = _parse_ratings_file(
     "Irish Horses National Hunt Ratings - Engine Format.txt"
 )
 
-# Horse performance stats
 _HORSE_STATS_FLAT: Dict[str, dict] = _parse_stats_file("Irish Horses Flat 2025.txt")
 _HORSE_STATS_NH: Dict[str, dict] = _parse_stats_file(
     "Irish Horses National Hunt 2025 and 2026.txt"
 )
+
+# ---------- UK (loaded when files exist; empty dict otherwise) ----------
+_UK_TRAINER_DATA_FLAT: Dict[str, float] = _build_people_multipliers(
+    "UK Trainers Stats Flat 2025 and 2026.txt",
+)
+_UK_TRAINER_DATA_NH: Dict[str, float] = _build_people_multipliers(
+    "UK Trainers Stats National Hunt 2025 and 2026.txt",
+)
+
+_UK_JOCKEY_DATA_FLAT: Dict[str, float] = _build_people_multipliers(
+    "UK Jockeys Stats Flat 2025.txt",
+)
+_UK_JOCKEY_DATA_NH: Dict[str, float] = _build_people_multipliers(
+    "UK Jockeys Stats National Hunt 2025 and 2026.txt",
+)
+
+_UK_HORSE_RATINGS_FLAT: Dict[str, int] = _parse_ratings_file(
+    "UK Horses Flat Ratings - Engine Format.txt"
+)
+_UK_HORSE_RATINGS_NH: Dict[str, int] = _parse_ratings_file(
+    "UK Horses National Hunt Ratings - Engine Format.txt"
+)
+
+_UK_HORSE_STATS_FLAT: Dict[str, dict] = _parse_stats_file(
+    "UK Horses Flat 2025.txt"
+)
+_UK_HORSE_STATS_NH: Dict[str, dict] = _parse_stats_file(
+    "UK Horses National Hunt 2025 and 2026.txt"
+)
+
+
+# ============================================================
+# COUNTRY CLASSIFIER
+# ============================================================
+
+def _is_uk(country: str) -> bool:
+    """Return True when the race is in the UK (not Ireland)."""
+    if not country:
+        return False
+    c = country.lower().strip()
+    if c in ("ireland", "ire", "ie", "irish"):
+        return False
+    # Anything else (uk, gb, england, scotland, wales, etc.) → UK
+    return True
 
 
 # ============================================================
@@ -208,8 +249,8 @@ TRAINER_JOCKEY_COMBOS = {
 
 
 # ============================================================
-# UK TRAINER / JOCKEY FALLBACK
-# (used when name is not in Irish data files)
+# UK TRAINER / JOCKEY HARDCODED FALLBACK
+# (used for UK races only, when name is not in UK data files)
 # ============================================================
 
 _UK_TRAINER_FALLBACK: Dict[str, float] = {
@@ -283,50 +324,63 @@ class RacingAICore:
     # --------------------------------------------------------
     # TRAINER POWER
     # --------------------------------------------------------
-    def trainer_style_boost(self, trainer: str, race_type: str = "") -> float:
+    def trainer_style_boost(self, trainer: str, race_type: str = "",
+                            country: str = "") -> float:
         t = trainer.lower().strip()
-        data = _TRAINER_DATA_NH if _is_nh(race_type) else _TRAINER_DATA_FLAT
+        uk = _is_uk(country)
 
-        # 1. Exact match in race-type-specific Irish data
+        # Select primary dataset by country + race type
+        if uk:
+            data = _UK_TRAINER_DATA_NH if _is_nh(race_type) else _UK_TRAINER_DATA_FLAT
+        else:
+            data = _TRAINER_DATA_NH if _is_nh(race_type) else _TRAINER_DATA_FLAT
+
+        # 1. Exact match
         if t in data:
             return data[t]
 
-        # 2. Partial match in race-type-specific Irish data
+        # 2. Partial match
         for name, boost in data.items():
             if name in t or t in name:
                 return boost
 
-        # 3. UK fallback — exact
-        if t in _UK_TRAINER_FALLBACK:
-            return _UK_TRAINER_FALLBACK[t]
-
-        # 4. UK fallback — partial
-        for name, boost in _UK_TRAINER_FALLBACK.items():
-            if name in t or t in name:
-                return boost
+        # 3. UK hardcoded fallback (UK races only)
+        if uk:
+            if t in _UK_TRAINER_FALLBACK:
+                return _UK_TRAINER_FALLBACK[t]
+            for name, boost in _UK_TRAINER_FALLBACK.items():
+                if name in t or t in name:
+                    return boost
 
         return 1.0
 
     # --------------------------------------------------------
     # JOCKEY STRENGTH
     # --------------------------------------------------------
-    def jockey_boost(self, jockey: str, race_type: str = "") -> float:
+    def jockey_boost(self, jockey: str, race_type: str = "",
+                     country: str = "") -> float:
         j = jockey.lower().strip()
-        data = _JOCKEY_DATA_NH if _is_nh(race_type) else _JOCKEY_DATA_FLAT
+        uk = _is_uk(country)
 
-        # 1. Exact match in race-type-specific Irish data
+        if uk:
+            data = _UK_JOCKEY_DATA_NH if _is_nh(race_type) else _UK_JOCKEY_DATA_FLAT
+        else:
+            data = _JOCKEY_DATA_NH if _is_nh(race_type) else _JOCKEY_DATA_FLAT
+
+        # 1. Exact match
         if j in data:
             return data[j]
 
-        # 2. Partial match in race-type-specific Irish data
+        # 2. Partial match
         for name, boost in data.items():
             if name in j or j in name:
                 return boost
 
-        # 3. UK fallback
-        for name, boost in _UK_JOCKEY_FALLBACK.items():
-            if name in j:
-                return boost
+        # 3. UK hardcoded fallback (UK races only)
+        if uk:
+            for name, boost in _UK_JOCKEY_FALLBACK.items():
+                if name in j:
+                    return boost
 
         return 1.0
 
@@ -346,19 +400,23 @@ class RacingAICore:
     # --------------------------------------------------------
     # HORSE RATING BOOST
     # --------------------------------------------------------
-    def horse_rating_boost(self, horse_name: str, race_type: str) -> float:
+    def horse_rating_boost(self, horse_name: str, race_type: str,
+                           country: str = "") -> float:
         """Look up official rating and convert to a score multiplier.
 
         Flat ratings (100-126): max +8%.
         NH ratings (140-164): max +8%.
-        Uses only the dataset that matches the race type.
+        Uses only the dataset that matches the country + race type.
         """
         name = horse_name.lower().strip()
+        uk = _is_uk(country)
 
-        if _is_nh(race_type):
-            rating = _HORSE_RATINGS_NH.get(name)
+        if uk:
+            rating = (_UK_HORSE_RATINGS_NH if _is_nh(race_type)
+                      else _UK_HORSE_RATINGS_FLAT).get(name)
         else:
-            rating = _HORSE_RATINGS_FLAT.get(name)
+            rating = (_HORSE_RATINGS_NH if _is_nh(race_type)
+                      else _HORSE_RATINGS_FLAT).get(name)
 
         if rating is None:
             return 1.0
@@ -375,13 +433,19 @@ class RacingAICore:
     # --------------------------------------------------------
     # HORSE PERFORMANCE BOOST
     # --------------------------------------------------------
-    def horse_performance_boost(self, horse_name: str, race_type: str = "") -> float:
+    def horse_performance_boost(self, horse_name: str, race_type: str = "",
+                                country: str = "") -> float:
         """Derive a multiplier from the horse's own win-rate in stats files."""
         name = horse_name.lower().strip()
-        if _is_nh(race_type):
-            stats = _HORSE_STATS_NH.get(name)
+        uk = _is_uk(country)
+
+        if uk:
+            stats = (_UK_HORSE_STATS_NH if _is_nh(race_type)
+                     else _UK_HORSE_STATS_FLAT).get(name)
         else:
-            stats = _HORSE_STATS_FLAT.get(name)
+            stats = (_HORSE_STATS_NH if _is_nh(race_type)
+                     else _HORSE_STATS_FLAT).get(name)
+
         if not stats:
             return 1.0
         return _win_rate_to_multiplier(stats["wins"], stats["runs"])
@@ -424,12 +488,13 @@ class RacingAICore:
     # CONFIDENCE DEDUCTION FOR MISSING DATA
     # --------------------------------------------------------
     def _confidence_deduction(self, trainer: str, jockey: str,
-                              horse_name: str, race_type: str = "") -> int:
+                              horse_name: str, race_type: str = "",
+                              country: str = "") -> int:
         """Return confidence points to deduct when historical data is absent.
 
         Missing trainer in all sources  → -3 points
         Missing jockey in all sources   → -3 points
-        Horse absent from the race-type-
+        Horse absent from the country/type-
           specific rating AND stats file → -2 points
 
         Maximum total deduction: 8 points.
@@ -437,43 +502,107 @@ class RacingAICore:
         """
         deduction = 0
         is_nh = _is_nh(race_type)
+        uk = _is_uk(country)
 
-        trainer_data = _TRAINER_DATA_NH if is_nh else _TRAINER_DATA_FLAT
+        # Trainer check — country-specific data + UK fallback for UK races
+        if uk:
+            td = _UK_TRAINER_DATA_NH if is_nh else _UK_TRAINER_DATA_FLAT
+        else:
+            td = _TRAINER_DATA_NH if is_nh else _TRAINER_DATA_FLAT
         t = trainer.lower().strip()
         trainer_found = (
-            t in trainer_data
-            or any(n in t or t in n for n in trainer_data)
-            or t in _UK_TRAINER_FALLBACK
-            or any(n in t or t in n for n in _UK_TRAINER_FALLBACK)
+            t in td
+            or any(n in t or t in n for n in td)
         )
+        if not trainer_found and uk:
+            trainer_found = (
+                t in _UK_TRAINER_FALLBACK
+                or any(n in t or t in n for n in _UK_TRAINER_FALLBACK)
+            )
         if not trainer_found:
             deduction += 3
 
-        jockey_data = _JOCKEY_DATA_NH if is_nh else _JOCKEY_DATA_FLAT
+        # Jockey check
+        if uk:
+            jd = _UK_JOCKEY_DATA_NH if is_nh else _UK_JOCKEY_DATA_FLAT
+        else:
+            jd = _JOCKEY_DATA_NH if is_nh else _JOCKEY_DATA_FLAT
         j = jockey.lower().strip()
         jockey_found = (
-            j in jockey_data
-            or any(n in j or j in n for n in jockey_data)
-            or any(n in j for n in _UK_JOCKEY_FALLBACK)
+            j in jd
+            or any(n in j or j in n for n in jd)
         )
+        if not jockey_found and uk:
+            jockey_found = any(n in j for n in _UK_JOCKEY_FALLBACK)
         if not jockey_found:
             deduction += 3
 
+        # Horse check
         name = horse_name.lower().strip()
-        if is_nh:
-            horse_has_data = (
-                _HORSE_RATINGS_NH.get(name) is not None
-                or _HORSE_STATS_NH.get(name) is not None
-            )
+        if uk:
+            rats = _UK_HORSE_RATINGS_NH if is_nh else _UK_HORSE_RATINGS_FLAT
+            stats = _UK_HORSE_STATS_NH if is_nh else _UK_HORSE_STATS_FLAT
         else:
-            horse_has_data = (
-                _HORSE_RATINGS_FLAT.get(name) is not None
-                or _HORSE_STATS_FLAT.get(name) is not None
-            )
+            rats = _HORSE_RATINGS_NH if is_nh else _HORSE_RATINGS_FLAT
+            stats = _HORSE_STATS_NH if is_nh else _HORSE_STATS_FLAT
+        horse_has_data = (
+            rats.get(name) is not None
+            or stats.get(name) is not None
+        )
         if not horse_has_data:
             deduction += 2
 
         return deduction
+
+    # --------------------------------------------------------
+    # AI PICK WRITEUP
+    # --------------------------------------------------------
+    @staticmethod
+    def _build_writeup(form: float, connections: float,
+                       structural: float, fitness: float,
+                       rating_boost: float, perf_boost: float) -> str:
+        """Generate a brief Racing Post-style writeup from scoring factors."""
+        parts = []
+
+        if form >= 0.95:
+            parts.append("strong recent form")
+        elif form >= 0.75:
+            parts.append("solid form figures")
+        elif form < 0.55:
+            parts.append("form is a concern")
+
+        if rating_boost >= 1.04:
+            parts.append("high official rating")
+        elif rating_boost >= 1.02:
+            parts.append("solid rating")
+
+        if connections >= 1.06:
+            parts.append("top trainer/jockey combination")
+        elif connections >= 1.03:
+            parts.append("positive connections")
+
+        if perf_boost >= 1.04:
+            parts.append("proven track record")
+        elif perf_boost >= 1.02:
+            parts.append("decent win record")
+
+        if structural >= 1.05:
+            parts.append("weight advantage")
+        elif structural <= 0.82:
+            parts.append("burdened by weight")
+
+        if fitness >= 1.04:
+            parts.append("prime age profile")
+
+        if not parts:
+            return "Limited historical data available for assessment."
+
+        if len(parts) == 1:
+            return parts[0].capitalize() + "."
+        if len(parts) == 2:
+            return parts[0].capitalize() + " and " + parts[1] + "."
+        return (parts[0].capitalize() + " with " + parts[1]
+                + " and " + parts[2] + ".")
 
     # --------------------------------------------------------
     # MAIN ANALYSIS
@@ -490,11 +619,15 @@ class RacingAICore:
             weight  = self.weight_score(r)
             age     = self.age_score(r.age)
 
-            trainer = self.trainer_style_boost(r.trainer, race.race_type)
-            jockey  = self.jockey_boost(r.jockey, race.race_type)
+            trainer = self.trainer_style_boost(r.trainer, race.race_type,
+                                                race.country)
+            jockey  = self.jockey_boost(r.jockey, race.race_type,
+                                        race.country)
             combo   = self.combo_boost(r.trainer, r.jockey)
-            rating  = self.horse_rating_boost(r.name, race.race_type)
-            perf    = self.horse_performance_boost(r.name, race.race_type)
+            rating  = self.horse_rating_boost(r.name, race.race_type,
+                                              race.country)
+            perf    = self.horse_performance_boost(r.name, race.race_type,
+                                                   race.country)
 
             final_score = (
                 base   * 0.25 +
@@ -513,17 +646,21 @@ class RacingAICore:
             # Reduce slightly when trainer, jockey, or horse data is absent —
             # the score is unchanged; we simply lower certainty.
             conf_deduction = self._confidence_deduction(
-                r.trainer, r.jockey, r.name, race.race_type)
+                r.trainer, r.jockey, r.name, race.race_type, race.country)
             confidence = min(95, max(70, int(final_score * 80) - conf_deduction))
 
+            conn = round(trainer * jockey * combo, 3)
             scored.append({
                 "name":        r.name,
                 "score":       round(final_score, 3),
                 "confidence":  confidence,
                 "form":        round(form, 3),
-                "connections": round(trainer * jockey * combo, 3),
+                "connections": conn,
                 "structural":  round(weight, 3),
                 "fitness":     round(age, 3),
+                # Temporary — used for writeups, stripped before return
+                "_rating_b":   rating,
+                "_perf_b":     perf,
             })
 
         scored.sort(key=lambda x: x["score"], reverse=True)
@@ -539,9 +676,18 @@ class RacingAICore:
         elif len(scored) == 1:
             race_confidence = "MEDIUM"
 
+        # Helper to build a writeup from a scored entry
+        def _wp(entry):
+            return self._build_writeup(
+                entry["form"], entry["connections"], entry["structural"],
+                entry["fitness"], entry["_rating_b"], entry["_perf_b"],
+            )
+
         # Picks — strictly by ranking position (0 = gold, 1 = silver)
-        gold = {**scored[0], "label": "Good E/W Bet"} if scored else None
-        silver = {**scored[1], "label": "Good Place Bet"} if len(scored) > 1 else None
+        gold = ({**scored[0], "label": "Good E/W Bet",
+                 "writeup": _wp(scored[0])} if scored else None)
+        silver = ({**scored[1], "label": "Good Place Bet",
+                   "writeup": _wp(scored[1])} if len(scored) > 1 else None)
 
         gold_name   = scored[0]["name"] if scored else None
         silver_name = scored[1]["name"] if len(scored) > 1 else None
@@ -550,14 +696,18 @@ class RacingAICore:
         dark = None
         for candidate in reversed(scored):
             if candidate["name"] != gold_name and candidate["name"] != silver_name:
-                dark = {**candidate, "label": "Value Play"}
+                dark = {**candidate, "label": "Value Play",
+                        "writeup": _wp(candidate)}
                 break
 
         dark_name = dark["name"] if dark else None
 
         # Embed position-based labels into full_rankings so the UI
-        # can read them directly without any score-threshold logic
+        # can read them directly without any score-threshold logic.
+        # Strip temporary writeup-helper fields from all entries.
         for i, entry in enumerate(scored):
+            entry.pop("_rating_b", None)
+            entry.pop("_perf_b", None)
             if i == 0:
                 entry["label"] = "Good E/W Bet"
             elif i == 1:
@@ -566,6 +716,12 @@ class RacingAICore:
                 entry["label"] = "Value Play"
             else:
                 entry["label"] = ""
+
+        # Strip temp fields from picks too (they were spread-copied)
+        for pick in (gold, silver, dark):
+            if pick:
+                pick.pop("_rating_b", None)
+                pick.pop("_perf_b", None)
 
         return {
             "gold_pick":       gold,
