@@ -158,29 +158,31 @@ def _is_nh(race_type: str) -> bool:
 
 # ---------- IRISH ----------
 _TRAINER_DATA_FLAT: Dict[str, float] = _build_people_multipliers(
-    "Irish Trainers Stats Flat 2025 and 2026.txt",
+    "Irish Trainers Stats Flat 2024 and 2025 and 2026.txt",
 )
 _TRAINER_DATA_NH: Dict[str, float] = _build_people_multipliers(
-    "Irish Trainers Stats National Hunt 2025 and 2026.txt",
+    "Irish Trainers Stats National Hunt (Jumps) 2024 and 2025 and 2026.txt",
 )
 
 _JOCKEY_DATA_FLAT: Dict[str, float] = _build_people_multipliers(
-    "Irish Jockeys Stats Flat 2025.txt",
+    "Irish Jockeys Stats Flat 2024 and 2025.txt",
 )
 _JOCKEY_DATA_NH: Dict[str, float] = _build_people_multipliers(
-    "Irish Jockeys Stats National Hunt 2025 and 2026.txt",
+    "Irish Jockeys Stats National Hunt 2024 and 2025 and 2026.txt",
 )
 
 _HORSE_RATINGS_FLAT: Dict[str, int] = _parse_ratings_file(
-    "Irish Horses Flat Ratings - Engine Format.txt"
+    "Irish Horse Ratings For Flat Racing - Engine Format.txt"
 )
 _HORSE_RATINGS_NH: Dict[str, int] = _parse_ratings_file(
-    "Irish Horses National Hunt Ratings - Engine Format.txt"
+    "Irish Horse Ratings For National Hunt Racing (Jumps) - Engine Format.txt"
 )
 
-_HORSE_STATS_FLAT: Dict[str, dict] = _parse_stats_file("Irish Horses Flat 2025.txt")
+_HORSE_STATS_FLAT: Dict[str, dict] = _parse_stats_file(
+    "Irish Horses Flat 2024 and 2025 - Engine Format.txt"
+)
 _HORSE_STATS_NH: Dict[str, dict] = _parse_stats_file(
-    "Irish Horses National Hunt 2025 and 2026.txt"
+    "Irish Horses National Hunt (Jumps) 2024 and 2025 and 2026 - Engine Format.txt"
 )
 
 # ---------- UK (loaded when files exist; empty dict otherwise) ----------
