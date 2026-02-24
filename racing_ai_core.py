@@ -185,31 +185,31 @@ _HORSE_STATS_NH: Dict[str, dict] = _parse_stats_file(
 
 # ---------- UK (loaded when files exist; empty dict otherwise) ----------
 _UK_TRAINER_DATA_FLAT: Dict[str, float] = _build_people_multipliers(
-    "UK Trainers Stats Flat 2025 and 2026.txt",
+    "UK_Trainers_Flat_clean.txt",
 )
 _UK_TRAINER_DATA_NH: Dict[str, float] = _build_people_multipliers(
-    "UK Trainers Stats National Hunt 2025 and 2026.txt",
+    "UK_Trainers_Jumps_clean.txt",
 )
 
 _UK_JOCKEY_DATA_FLAT: Dict[str, float] = _build_people_multipliers(
-    "UK Jockeys Stats Flat 2025.txt",
+    "UK_Jockeys_Flat_clean.txt",
 )
 _UK_JOCKEY_DATA_NH: Dict[str, float] = _build_people_multipliers(
-    "UK Jockeys Stats National Hunt 2025 and 2026.txt",
+    "UK_Jockeys_Jumps_clean.txt",
 )
 
 _UK_HORSE_RATINGS_FLAT: Dict[str, int] = _parse_ratings_file(
-    "UK Horses Flat Ratings - Engine Format.txt"
+    "UK_Ratings_Flat_Top500.txt"
 )
 _UK_HORSE_RATINGS_NH: Dict[str, int] = _parse_ratings_file(
-    "UK Horses National Hunt Ratings - Engine Format.txt"
+    "UK_Ratings_Jumps_Top500.txt"
 )
 
 _UK_HORSE_STATS_FLAT: Dict[str, dict] = _parse_stats_file(
-    "UK Horses Flat 2025.txt"
+    "UK_Horses_Flat_2024_2025_2026_clean.txt"
 )
 _UK_HORSE_STATS_NH: Dict[str, dict] = _parse_stats_file(
-    "UK Horses National Hunt 2025 and 2026.txt"
+    "UK_Horses_Jumps_2024_2025_2026_clean.txt"
 )
 
 
