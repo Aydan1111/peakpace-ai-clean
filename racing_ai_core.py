@@ -665,10 +665,10 @@ class RacingAICore:
         """Small confidence deduction when going is testing (soft/heavy/good-to-soft).
 
         Does NOT touch score or ranking — confidence only.
-        Deductions (max combined 2):
-          +1  horse has fewer than 8 career runs (inexperience on testing ground)
+        Deductions (max combined 4):
+          +2  horse has fewer than 8 career runs (inexperience on testing ground)
                OR has no historical stats at all
-          +1  horse carries more than 138 lbs net (heavy burden harder on soft)
+          +2  horse carries more than 138 lbs net (heavy burden harder on soft)
         """
         if going.lower().strip() not in _TESTING_GOING:
             return 0
@@ -688,14 +688,14 @@ class RacingAICore:
 
         # No data at all, or very few career runs → uncertain on testing ground
         if stats is None or stats["runs"] < 8:
-            penalty += 1
+            penalty += 2
 
         # High net weight is a greater physical burden on soft/heavy ground
         net_weight = runner.weight_lbs - runner.jockey_claim_lbs
         if net_weight > 138:
-            penalty += 1
+            penalty += 2
 
-        return min(penalty, 2)
+        return min(penalty, 4)
 
     # --------------------------------------------------------
     # MAIN ANALYSIS
