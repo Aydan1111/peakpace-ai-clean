@@ -1,3 +1,36 @@
+/** Minimal horse-and-jockey silhouette — premium, not cartoonish. */
+function HorseIcon({ size = 18, className = "" }) {
+  return (
+    <svg
+      viewBox="0 0 56 40"
+      width={size}
+      height={Math.round(size * 0.71)}
+      fill="currentColor"
+      className={className}
+      aria-hidden="true"
+    >
+      {/* Jockey: head */}
+      <circle cx="42" cy="6" r="4.5" />
+      {/* Jockey: crouched torso over horse */}
+      <path d="M38 10 C32 15 30 20 36 23 C40 20 46 14 47 10 Z" />
+      {/* Horse: body */}
+      <path d="M8 22 C8 14 28 12 42 18 C46 20 48 24 46 28 C44 32 36 35 26 35 C14 35 8 30 8 22 Z" />
+      {/* Horse: neck */}
+      <path d="M40 18 C44 12 44 7 42 5 C40 6 37 10 36 14 Z" />
+      {/* Horse: ear */}
+      <path d="M41 5 C42 2 45 2 44 5 Z" />
+      {/* Horse: tail */}
+      <path d="M8 24 C2 20 0 26 4 28 C6 28 9 27 9 25 Z" />
+      {/* Front legs — extended forward */}
+      <rect x="37" y="33" width="3" height="7" rx="1.5" transform="rotate(12,38.5,33)" />
+      <rect x="43" y="32" width="3" height="7" rx="1.5" transform="rotate(22,44.5,32)" />
+      {/* Back legs — extended back */}
+      <rect x="16" y="33" width="3" height="7" rx="1.5" transform="rotate(-18,17.5,33)" />
+      <rect x="22" y="33" width="3" height="7" rx="1.5" transform="rotate(-6,23.5,33)" />
+    </svg>
+  );
+}
+
 const PICK_CONFIG = {
   GOLD: {
     emoji: "\u{1F947}",
@@ -31,9 +64,9 @@ export default function ResultsPanel({ result }) {
   const darkName = result.dark_horse?.name;
 
   const picks = [
-    result.gold_pick && { pick: "GOLD", name: goldName, model_alignment: result.gold_pick.confidence, why: result.gold_pick.label },
-    result.silver_pick && { pick: "SILVER", name: silverName, model_alignment: result.silver_pick.confidence, why: result.silver_pick.label },
-    result.dark_horse && darkName !== silverName && { pick: "DARK HORSE", name: darkName, model_alignment: result.dark_horse.confidence, why: result.dark_horse.label },
+    result.gold_pick && { pick: "GOLD", name: goldName, model_alignment: result.gold_pick.confidence, why: result.gold_pick.label, writeup: result.gold_pick.writeup },
+    result.silver_pick && { pick: "SILVER", name: silverName, model_alignment: result.silver_pick.confidence, why: result.silver_pick.label, writeup: result.silver_pick.writeup },
+    result.dark_horse && darkName !== silverName && { pick: "DARK HORSE", name: darkName, model_alignment: result.dark_horse.confidence, why: result.dark_horse.label, writeup: result.dark_horse.writeup },
   ].filter(Boolean);
 
   const predictions_table = (result.full_rankings || []).map((r) => {
@@ -65,7 +98,10 @@ export default function ResultsPanel({ result }) {
   return (
     <section className="bg-surface rounded-xl border border-border p-6 space-y-6">
       <div className="flex items-center justify-between flex-wrap gap-2">
-        <h2 className="text-lg font-semibold text-gold">Analysis Results</h2>
+        <h2 className="text-lg font-semibold text-gold flex items-center gap-2">
+          <HorseIcon size={22} className="text-gold-dim opacity-80" />
+          Analysis Results
+        </h2>
         {raceConf && (
           <span className={`text-xs font-bold uppercase tracking-wider px-2 py-1 rounded border ${confStyle}`}>
             {raceConf} Confidence
@@ -94,8 +130,13 @@ export default function ResultsPanel({ result }) {
               <p className="text-gold text-sm font-medium mt-1">
                 {p.model_alignment} alignment
               </p>
+              {p.writeup && (
+                <p className="text-text-dim text-xs mt-2 leading-relaxed italic border-t border-border/30 pt-2">
+                  {p.writeup}
+                </p>
+              )}
               {p.why && (
-                <p className="text-text-dim text-xs mt-2 leading-relaxed">
+                <p className="text-text-dim text-xs mt-1 opacity-60">
                   {p.why}
                 </p>
               )}
@@ -106,7 +147,8 @@ export default function ResultsPanel({ result }) {
 
       {/* Full Rankings Table */}
       <div>
-        <h3 className="text-sm font-semibold text-text-dim uppercase tracking-wide mb-3">
+        <h3 className="text-sm font-semibold text-text-dim uppercase tracking-wide mb-3 flex items-center gap-1.5">
+          <HorseIcon size={14} className="opacity-50" />
           Full Rankings
         </h3>
         <div className="overflow-x-auto">
