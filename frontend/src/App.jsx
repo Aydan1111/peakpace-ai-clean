@@ -209,6 +209,11 @@ export default function App() {
       >
         <div className="hero-gradient" aria-hidden="true" />
         <div className="hero-content">
+          <img
+            src="/images/hero-bg.jpg"
+            alt="Horse head sculpture"
+            className="hero-horse-img"
+          />
           <h1 className="hero-title">
             <span className="text-gold">PeakPace</span>{" "}
             <span className="hero-title-ai">AI</span>
