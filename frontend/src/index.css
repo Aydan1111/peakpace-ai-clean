@@ -102,3 +102,63 @@ body {
   border-color: var(--color-gold-dim);
   color: var(--color-gold);
 }
+
+/* ── Hero Section ──────────────────────────────────────────────────────── */
+.hero-section {
+  position: relative;
+  width: 100%;
+  height: 320px;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: #0d0d0d;
+}
+
+.hero-image {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center 30%;
+}
+
+.hero-gradient {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    to bottom,
+    rgba(17, 17, 17, 0.30) 0%,
+    rgba(17, 17, 17, 0.50) 50%,
+    rgba(17, 17, 17, 0.90) 88%,
+    rgba(17, 17, 17, 1.00) 100%
+  );
+}
+
+.hero-content {
+  position: relative;
+  z-index: 10;
+  text-align: center;
+  padding: 0 1.5rem;
+}
+
+.hero-title {
+  font-size: clamp(2.25rem, 6vw, 3.5rem);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  margin: 0 0 0.5rem;
+}
+
+.hero-title-ai {
+  color: var(--color-text-dim);
+  font-weight: 300;
+}
+
+.hero-subtitle {
+  font-size: 0.9375rem;
+  color: rgba(232, 232, 232, 0.65);
+  margin: 0;
+  letter-spacing: 0.02em;
+}
