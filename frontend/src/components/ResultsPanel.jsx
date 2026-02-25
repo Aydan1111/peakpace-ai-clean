@@ -31,6 +31,58 @@ function HorseIcon({ size = 18, className = "" }) {
   );
 }
 
+/**
+ * Large premium horse-and-jockey silhouette for the Results section background.
+ * Rendered at low opacity as a decorative watermark — does not affect layout.
+ */
+function RacetrackWatermark() {
+  return (
+    <svg
+      viewBox="0 0 280 175"
+      aria-hidden="true"
+      fill="currentColor"
+      style={{
+        position: "absolute",
+        bottom: "-24px",
+        right: "-16px",
+        width: "340px",
+        height: "auto",
+        opacity: 0.13,
+        pointerEvents: "none",
+        userSelect: "none",
+        color: "#d4a843",
+      }}
+    >
+      {/* Horse body — main mass */}
+      <path d="M48,105 C50,83 73,69 107,67 C141,65 186,71 208,85 C222,95 222,115 208,127 C188,141 136,145 94,139 C63,133 46,122 48,105 Z" />
+      {/* Neck */}
+      <path d="M205,85 C216,69 224,50 220,35 C218,25 210,23 206,30 C202,38 200,63 198,83 Z" />
+      {/* Head */}
+      <path d="M212,31 C218,17 238,14 244,26 C250,37 242,52 230,53 C218,53 208,43 212,31 Z" />
+      {/* Ear */}
+      <path d="M216,23 C218,11 226,11 224,21 Z" />
+      {/* Nostril */}
+      <ellipse cx="241" cy="35" rx="4" ry="3" />
+      {/* Tail — flowing back */}
+      <path d="M50,98 C34,87 18,87 12,98 C6,108 14,117 26,113 C38,109 46,104 50,98 Z" />
+      {/* Front left leg (extended forward) */}
+      <path d="M193,127 C197,141 200,157 199,171 L 193,171 C193,157 190,142 186,128 Z" />
+      {/* Front right leg */}
+      <path d="M175,131 C178,145 180,160 178,171 L 172,171 C173,160 172,145 169,131 Z" />
+      {/* Back left leg (extended backward) */}
+      <path d="M86,131 C81,145 77,160 75,171 L 69,171 C71,160 75,145 80,130 Z" />
+      {/* Back right leg */}
+      <path d="M104,133 C101,147 99,161 99,171 L 93,171 C93,161 95,147 98,132 Z" />
+      {/* Jockey head */}
+      <circle cx="224" cy="21" r="10" />
+      {/* Jockey torso — crouched forward */}
+      <path d="M212,29 C204,44 203,62 213,72 C221,64 232,46 234,29 Z" />
+      {/* Jockey arm / whip */}
+      <path d="M206,56 C200,66 198,76 201,80 C204,81 207,80 208,76 C209,70 210,62 212,54 Z" />
+    </svg>
+  );
+}
+
 const PICK_CONFIG = {
   GOLD: {
     emoji: "\u{1F947}",
@@ -96,10 +148,11 @@ export default function ResultsPanel({ result }) {
     : "bg-gray-500/20 text-gray-300 border-gray-500/40";
 
   return (
-    <section className="bg-surface rounded-xl border border-border p-6 space-y-6">
+    <section className="relative overflow-hidden bg-surface rounded-xl border border-border p-6 space-y-6">
+      <RacetrackWatermark />
       <div className="flex items-center justify-between flex-wrap gap-2">
         <h2 className="text-lg font-semibold text-gold flex items-center gap-2">
-          <HorseIcon size={22} className="text-gold-dim opacity-80" />
+          <HorseIcon size={36} className="text-gold opacity-90" />
           Analysis Results
         </h2>
         {raceConf && (
@@ -125,6 +178,7 @@ export default function ResultsPanel({ result }) {
                 >
                   {cfg.label}
                 </span>
+                <HorseIcon size={16} className={`ml-auto opacity-50 ${cfg.text}`} />
               </div>
               <p className="text-lg font-semibold">{p.name}</p>
               <p className="text-gold text-sm font-medium mt-1">
