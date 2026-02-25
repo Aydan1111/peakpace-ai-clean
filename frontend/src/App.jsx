@@ -203,13 +203,10 @@ export default function App() {
     <div className="min-h-screen">
 
       {/* ── Hero Section ─────────────────────────────────────────────────── */}
-      <div className="hero-section">
-        <img
-          src="/images/hero-bg.jpg"
-          alt=""
-          className="hero-image"
-          aria-hidden="true"
-        />
+      <div
+        className="hero-section"
+        style={{ backgroundImage: "url('/images/hero-bg.jpg')" }}
+      >
         <div className="hero-gradient" aria-hidden="true" />
         <div className="hero-content">
           <h1 className="hero-title">
