@@ -570,6 +570,7 @@ class RacingAICore:
         rating_boost: float, perf_boost: float,
         conf_deduction: int = 0,
         going_penalty: int = 0,
+        rating_edge: float = 0.0,
     ) -> str:
         """Generate a 1–2 sentence Racing Post-style writeup from scoring factors.
 
@@ -649,7 +650,13 @@ class RacingAICore:
                 unc += "; " + unc_parts[1]
             return sentence1 + " " + unc + "."
 
-        # Minor concern note when no uncertainty sentence but weight/form issues
+        # Field-strength context phrase (only when no uncertainty sentence)
+        if rating_edge >= 5:
+            return sentence1 + " Holds a clear ratings edge over this field."
+        if rating_edge <= -5:
+            return sentence1 + " Faces stronger opposition on ratings."
+
+        # Minor concern note when no other second sentence
         if weight_concern and strengths:
             return sentence1 + " Weight burden may be a factor."
         if form_concern and strengths:
@@ -696,6 +703,24 @@ class RacingAICore:
             penalty += 2
 
         return min(penalty, 4)
+
+    # --------------------------------------------------------
+    # RAW RATING LOOKUP (for field-context calculation)
+    # --------------------------------------------------------
+    def _get_horse_rating(self, horse_name: str, race_type: str,
+                          country: str = "") -> Optional[int]:
+        """Return the raw official rating integer for a horse, or None.
+
+        Reuses the same rating dicts as horse_rating_boost() — no new data.
+        Used only for the field-average context layer; never alters scoring.
+        """
+        name = horse_name.lower().strip()
+        uk = _is_uk(country)
+        if uk:
+            return (_UK_HORSE_RATINGS_NH if _is_nh(race_type)
+                    else _UK_HORSE_RATINGS_FLAT).get(name)
+        return (_HORSE_RATINGS_NH if _is_nh(race_type)
+                else _HORSE_RATINGS_FLAT).get(name)
 
     # --------------------------------------------------------
     # MAIN ANALYSIS
@@ -746,6 +771,8 @@ class RacingAICore:
                                      - conf_deduction - going_pen))
 
             conn = round(trainer * jockey * combo, 3)
+            raw_rating = self._get_horse_rating(r.name, race.race_type,
+                                                race.country)
             scored.append({
                 "name":        r.name,
                 "score":       round(final_score, 3),
@@ -762,9 +789,29 @@ class RacingAICore:
                 "_combo_b":    combo,
                 "_conf_ded":   conf_deduction,
                 "_going_pen":  going_pen,
+                "_raw_rating": raw_rating,   # raw int or None
             })
 
         scored.sort(key=lambda x: x["score"], reverse=True)
+
+        # Field-strength context — confidence ±1 when a horse is clearly
+        # above or below the field average on official ratings.
+        # Score and sort order are never touched.
+        raw_ratings = [e["_raw_rating"] for e in scored
+                       if e["_raw_rating"] is not None]
+        field_avg = (sum(raw_ratings) / len(raw_ratings)
+                     if raw_ratings else None)
+        for entry in scored:
+            raw_r = entry["_raw_rating"]
+            if field_avg is not None and raw_r is not None:
+                edge = raw_r - field_avg
+                if edge >= 5:
+                    entry["confidence"] = min(95, entry["confidence"] + 1)
+                elif edge <= -5:
+                    entry["confidence"] = max(70, entry["confidence"] - 1)
+                entry["_rating_edge"] = round(edge, 1)
+            else:
+                entry["_rating_edge"] = 0.0
 
         # Race-level confidence based on spread between top two
         race_confidence = "LOW"
@@ -785,6 +832,7 @@ class RacingAICore:
                 entry["structural"], entry["fitness"],
                 entry["_rating_b"], entry["_perf_b"],
                 entry["_conf_ded"], entry["_going_pen"],
+                entry["_rating_edge"],
             )
 
         # Picks — strictly by ranking position (0 = gold, 1 = silver)
@@ -810,7 +858,8 @@ class RacingAICore:
         # can read them directly without any score-threshold logic.
         # Strip all temporary writeup-helper fields from every entry.
         _temp = ("_rating_b", "_perf_b", "_trainer_b", "_jockey_b",
-                 "_combo_b", "_conf_ded", "_going_pen")
+                 "_combo_b", "_conf_ded", "_going_pen",
+                 "_raw_rating", "_rating_edge")
         for i, entry in enumerate(scored):
             for f in _temp:
                 entry.pop(f, None)
