@@ -107,14 +107,13 @@ body {
 .hero-section {
   position: relative;
   width: 100%;
-  min-height: 240px;
-  max-height: 260px;
+  height: clamp(320px, 38vw, 420px);
   display: flex;
   align-items: center;
   justify-content: center;
   background-color: #0d0d0d;
-  background-size: 120% auto;
-  background-position: center top;
+  background-size: cover;
+  background-position: center center;
   background-repeat: no-repeat;
 }
 
