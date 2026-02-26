@@ -503,7 +503,9 @@ class RacingAICore:
           specific rating AND stats file → -2 points
 
         Maximum total deduction: 8 points.
-        The score itself is never altered; only confidence is reduced.
+        The deduction also drives adaptive racecard weighting and a direct
+        score penalty in analyze(), so unknown horses rank lower and are
+        deprioritised for Gold/Silver picks.
         """
         deduction = 0
         is_nh = _is_nh(race_type)
@@ -731,8 +733,6 @@ class RacingAICore:
 
         for r in runners:
 
-            base = 1.0
-
             form    = self.form_score(r.form)
             weight  = self.weight_score(r)
             age     = self.age_score(r.age)
@@ -747,11 +747,27 @@ class RacingAICore:
             perf    = self.horse_performance_boost(r.name, race.race_type,
                                                    race.country)
 
+            # Data quality check done early so it drives both weighting and
+            # the score penalty below.
+            conf_deduction = self._confidence_deduction(
+                r.trainer, r.jockey, r.name, race.race_type, race.country)
+
+            # Adaptive racecard weights: when historical data is sparse, shift
+            # weight toward observable racecard factors (form, age, weight).
+            # Full data → standard split.  Partial gap → moderate shift.
+            # Severely limited → maximise racecard factor influence.
+            if conf_deduction >= 5:
+                w_base, w_form, w_age, w_wt = 0.05, 0.50, 0.23, 0.22
+            elif conf_deduction >= 2:
+                w_base, w_form, w_age, w_wt = 0.15, 0.42, 0.22, 0.21
+            else:
+                w_base, w_form, w_age, w_wt = 0.25, 0.35, 0.20, 0.20
+
             final_score = (
-                base   * 0.25 +
-                form   * 0.35 +
-                age    * 0.20 +
-                weight * 0.20
+                1.0    * w_base +
+                form   * w_form +
+                age    * w_age +
+                weight * w_wt
             )
 
             final_score *= trainer
@@ -760,11 +776,12 @@ class RacingAICore:
             final_score *= rating
             final_score *= perf
 
-            # Clamp confidence to 70–95%.
-            # Reduce slightly when trainer, jockey, or horse data is absent —
-            # the score is unchanged; we simply lower certainty.
-            conf_deduction = self._confidence_deduction(
-                r.trainer, r.jockey, r.name, race.race_type, race.country)
+            # Score penalty for missing data: pushes unknown horses down the
+            # ranking so well-documented runners are preferred for top picks.
+            # 1.5% per deduction point, floor at 0.88 (~12% max reduction).
+            if conf_deduction > 0:
+                final_score *= max(0.88, 1.0 - conf_deduction * 0.015)
+
             going_pen = self._going_penalty(r, race.going, race.race_type,
                                             race.country)
             confidence = min(95, max(70, int(final_score * 80)
@@ -835,14 +852,29 @@ class RacingAICore:
                 entry["_rating_edge"],
             )
 
-        # Picks — strictly by ranking position (0 = gold, 1 = silver)
-        gold = ({**scored[0], "label": "Good E/W Bet",
-                 "writeup": _wp(scored[0])} if scored else None)
-        silver = ({**scored[1], "label": "Good Place Bet",
-                   "writeup": _wp(scored[1])} if len(scored) > 1 else None)
+        # Picks — prefer horses with sufficient data (conf_deduction < 5).
+        # A deduction of 5+ means at least two data sources are missing
+        # (e.g. trainer + horse, or trainer + jockey), making the pick
+        # little better than a guess.  Falls back to the full sorted list
+        # if every runner in the field has limited data.
+        _PICK_DED_LIMIT = 5
 
-        gold_name   = scored[0]["name"] if scored else None
-        silver_name = scored[1]["name"] if len(scored) > 1 else None
+        def _best_pick(ranked, exclude_names):
+            pool = [h for h in ranked if h["name"] not in exclude_names]
+            qualified = [h for h in pool if h["_conf_ded"] < _PICK_DED_LIMIT]
+            return (qualified or pool or [None])[0]
+
+        gold_entry   = _best_pick(scored, set())
+        gold_exclude = {gold_entry["name"]} if gold_entry else set()
+        silver_entry = _best_pick(scored, gold_exclude)
+
+        gold   = ({**gold_entry,   "label": "Good E/W Bet",
+                   "writeup": _wp(gold_entry)}   if gold_entry   else None)
+        silver = ({**silver_entry, "label": "Good Place Bet",
+                   "writeup": _wp(silver_entry)} if silver_entry else None)
+
+        gold_name   = gold_entry["name"]   if gold_entry   else None
+        silver_name = silver_entry["name"] if silver_entry else None
 
         # Dark horse: lowest-scored runner that is neither gold nor silver
         dark = None
