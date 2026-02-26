@@ -1,7 +1,7 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import List, Optional, Dict
 import re
 from racing_ai_core import RacingAICore, RaceInfo, Runner
 
@@ -88,6 +88,7 @@ class AnalyzeRequest(BaseModel):
     distance: str
     going: str
     runners: List[RunnerInput]
+    odds: Optional[Dict[str, str]] = None
 
 
 class TextRaceInput(BaseModel):
@@ -100,6 +101,22 @@ class TextRaceInput(BaseModel):
 
 
 class AnalyzeTextRequest(BaseModel):
+    race_info: TextRaceInput
+    racecard_text: str
+    odds: Optional[Dict[str, str]] = None
+
+
+class RaceQualityRequest(BaseModel):
+    course: str = "Unknown"
+    country: str = "UK"
+    race_type: str = "flat"
+    surface: str = "aw"
+    distance: str = "8f"
+    going: str = "good"
+    runners: List[RunnerInput]
+
+
+class RaceQualityTextRequest(BaseModel):
     race_info: TextRaceInput
     racecard_text: str
 
@@ -245,7 +262,7 @@ def analyze(request: AnalyzeRequest):
             )
         )
 
-    return engine.analyze(race, runner_objects)
+    return engine.analyze(race, runner_objects, odds=request.odds)
 
 
 # -------------------------------------------------
@@ -364,7 +381,81 @@ def analyze_text(request: AnalyzeTextRequest):
         for r in runners
     ]
 
-    return engine.analyze(race, runner_objects)
+    return engine.analyze(race, runner_objects, odds=request.odds)
+
+
+# -------------------------------------------------
+# RACE QUALITY CHECK (pre-analysis endpoints)
+# -------------------------------------------------
+
+@app.post("/race-quality")
+def race_quality(request: RaceQualityRequest):
+    """Pre-analysis quality check for manually-entered runners."""
+    race = RaceInfo(
+        course=request.course,
+        country=request.country,
+        race_type=request.race_type,
+        surface=request.surface,
+        distance_f=parse_distance_to_furlongs(request.distance),
+        going=normalize_going(request.going),
+        runners=len(request.runners),
+    )
+    runner_objects = []
+    for r in request.runners:
+        runner_objects.append(Runner(
+            name=r.name,
+            age=r.age,
+            weight_lbs=parse_weight_to_lbs(r.weight),
+            form=r.form or "",
+            trainer=r.trainer,
+            jockey=r.jockey,
+            draw=r.draw,
+            jockey_claim_lbs=r.jockey_claim_lbs or 0,
+        ))
+    result = engine.race_quality_check(race, runner_objects)
+    result["runner_names"] = [r.name for r in runner_objects]
+    return result
+
+
+@app.post("/race-quality-text")
+def race_quality_text(request: RaceQualityTextRequest):
+    """Pre-analysis quality check for paste-mode racecards."""
+    detected_type    = detect_race_type(request.racecard_text)
+    detected_country = detect_country(request.racecard_text)
+    detected_going   = detect_going(request.racecard_text)
+
+    runners = parse_racecard_text(request.racecard_text)
+    if len(runners) < 2:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Found {len(runners)} runner(s). Need at least 2.",
+        )
+
+    ri = request.race_info
+    going_str = detected_going if detected_going is not None else ri.going
+    race = RaceInfo(
+        course=ri.course,
+        country=detected_country,
+        race_type=detected_type,
+        surface=ri.surface,
+        distance_f=parse_distance_to_furlongs(ri.distance),
+        going=normalize_going(going_str),
+        runners=len(runners),
+    )
+    runner_objects = [
+        Runner(
+            name=r["name"],
+            age=r["age"],
+            weight_lbs=parse_weight_to_lbs(r["weight"]),
+            form=r["form"],
+            trainer=r["trainer"],
+            jockey=r["jockey"],
+        )
+        for r in runners
+    ]
+    result = engine.race_quality_check(race, runner_objects)
+    result["runner_names"] = [r.name for r in runner_objects]
+    return result
 
 
 # -------------------------------------------------

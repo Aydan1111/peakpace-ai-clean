@@ -31,8 +31,8 @@ export default function ResultsPanel({ result }) {
   const darkName = result.dark_horse?.name;
 
   const picks = [
-    result.gold_pick && { pick: "GOLD", name: goldName, model_alignment: result.gold_pick.confidence, why: result.gold_pick.label, writeup: result.gold_pick.writeup },
-    result.silver_pick && { pick: "SILVER", name: silverName, model_alignment: result.silver_pick.confidence, why: result.silver_pick.label, writeup: result.silver_pick.writeup },
+    result.gold_pick && { pick: "GOLD", name: goldName, model_alignment: result.gold_pick.confidence, why: result.gold_pick.label, writeup: result.gold_pick.writeup, market_flag: result.gold_pick.market_flag },
+    result.silver_pick && { pick: "SILVER", name: silverName, model_alignment: result.silver_pick.confidence, why: result.silver_pick.label, writeup: result.silver_pick.writeup, market_flag: result.silver_pick.market_flag },
     result.dark_horse && darkName !== silverName && { pick: "DARK HORSE", name: darkName, model_alignment: result.dark_horse.confidence, why: result.dark_horse.label, writeup: result.dark_horse.writeup },
   ].filter(Boolean);
 
@@ -99,6 +99,17 @@ export default function ResultsPanel({ result }) {
               {p.writeup && (
                 <p className="text-text-dim text-xs mt-2 leading-relaxed italic border-t border-border/30 pt-2">
                   {p.writeup}
+                </p>
+              )}
+              {p.market_flag && (
+                <p className={`text-xs mt-1 font-medium ${
+                  p.market_flag === "market_confirms" ? "text-green-400"
+                  : p.market_flag === "market_near_agreement" ? "text-yellow-400"
+                  : "text-red-400"
+                }`}>
+                  {p.market_flag === "market_confirms" && "Market agrees"}
+                  {p.market_flag === "market_near_agreement" && "Market near-agreement"}
+                  {p.market_flag === "model_vs_market" && "Market disagrees — long price"}
                 </p>
               )}
               {p.why && (

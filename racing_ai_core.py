@@ -43,6 +43,29 @@ class Runner:
 _DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 
 
+def _parse_odds(raw: str) -> Optional[float]:
+    """Convert fractional or decimal odds string to a decimal float.
+
+    "9/1"  → 10.0  |  "6/4"  → 2.5  |  "evs" → 2.0  |  "10.0" → 10.0
+    Returns None if the string cannot be parsed.
+    """
+    s = str(raw).strip().lower()
+    if s in ("evs", "evens", "1/1"):
+        return 2.0
+    if "/" in s:
+        parts = s.split("/")
+        try:
+            num, den = float(parts[0]), float(parts[1])
+            return round(num / den + 1, 4) if den != 0 else None
+        except ValueError:
+            return None
+    try:
+        val = float(s)
+        return val if val >= 1.01 else None
+    except ValueError:
+        return None
+
+
 def _parse_stats_file(filename: str) -> Dict[str, dict]:
     """Parse trainer/jockey/horse stats files.
 
@@ -725,9 +748,140 @@ class RacingAICore:
                 else _HORSE_RATINGS_FLAT).get(name)
 
     # --------------------------------------------------------
+    # RACE QUALITY CHECK  (pre-analysis, multi-signal)
+    # --------------------------------------------------------
+    def race_quality_check(self, race: RaceInfo,
+                           runners: List[Runner]) -> dict:
+        """Five-signal pre-analysis quality gate.
+
+        Each signal scores 0–3.  Total 0–15:
+          HIGH   = 11+   well-documented, analysable race
+          MEDIUM = 7–10  enough signal, some gaps
+          LOW    = 0–6   limited data, treat picks with caution
+
+        Signals
+        -------
+        data_coverage   % of field with trainer + jockey in our data
+        form_quality    % of field with ≥2 recorded form results
+        field_size      sweet spot is 6–12 runners
+        race_type       flat > NH for modelling confidence
+        field_richness  runners with at least one traceable signal
+                        (trainer OR jockey known) AND ≥1 form digit
+        """
+        n = len(runners)
+        if n == 0:
+            return {
+                "level": "LOW",
+                "headline": "No runners found.",
+                "total_score": 0,
+                "signals": {},
+            }
+
+        # ── Signal 1: Data coverage ──────────────────────────────────
+        # Partial credit (0.5) for runners missing only one source.
+        known: float = 0.0
+        for r in runners:
+            ded = self._confidence_deduction(
+                r.trainer, r.jockey, r.name, race.race_type, race.country)
+            if ded == 0:
+                known += 1.0
+            elif ded <= 2:
+                known += 0.5
+        cov_pct = known / n
+        if cov_pct >= 0.80:
+            data_s, data_l = 3, "Strong data coverage across the field"
+        elif cov_pct >= 0.55:
+            data_s, data_l = 2, "Decent coverage — a few runners untracked"
+        elif cov_pct >= 0.35:
+            data_s, data_l = 1, "Patchy data — several runners untracked"
+        else:
+            data_s, data_l = 0, "Limited data across most of the field"
+
+        # ── Signal 2: Form quality ────────────────────────────────────
+        form_rich = sum(
+            1 for r in runners
+            if len([c for c in (r.form or "") if c.isdigit()]) >= 2
+        )
+        form_pct = form_rich / n
+        if form_pct >= 0.70:
+            form_s, form_l = 3, "Good form figures available across the field"
+        elif form_pct >= 0.50:
+            form_s, form_l = 2, "Reasonable form data for most runners"
+        elif form_pct >= 0.30:
+            form_s, form_l = 1, "Thin form — limited runs to compare"
+        else:
+            form_s, form_l = 0, "Very sparse form — most runners unraced or unknown"
+
+        # ── Signal 3: Field size ──────────────────────────────────────
+        if 6 <= n <= 12:
+            size_s, size_l = 3, f"Good field size ({n} runners)"
+        elif 4 <= n <= 5 or 13 <= n <= 16:
+            size_s, size_l = 2, f"Workable field size ({n} runners)"
+        elif 2 <= n <= 3 or 17 <= n <= 20:
+            size_s, size_l = 1, f"Edge-case field size ({n} runners)"
+        else:
+            size_s, size_l = 0, f"Very large field ({n} runners) — difficult to model"
+
+        # ── Signal 4: Race type ───────────────────────────────────────
+        is_nh = _is_nh(race.race_type)
+        if not is_nh:
+            type_s, type_l = 3, "Flat race — well-structured for modelling"
+        elif _is_uk(race.country):
+            type_s, type_l = 2, "National Hunt — solid UK data available"
+        else:
+            type_s, type_l = 1, "National Hunt — more variance than flat"
+
+        # ── Signal 5: Mixed signal richness ──────────────────────────
+        # Runners where at least trainer/jockey is known AND form exists.
+        rich = sum(
+            1 for r in runners
+            if (
+                self._confidence_deduction(
+                    r.trainer, r.jockey, r.name,
+                    race.race_type, race.country) < 5
+                and len([c for c in (r.form or "") if c.isdigit()]) >= 1
+            )
+        )
+        rich_pct = rich / n
+        if rich_pct >= 0.65:
+            rich_s, rich_l = 3, "Most runners have traceable signals"
+        elif rich_pct >= 0.40:
+            rich_s, rich_l = 2, "A core group of runners have enough signal"
+        elif rich_pct >= 0.20:
+            rich_s, rich_l = 1, "Only a handful of runners have usable signal"
+        else:
+            rich_s, rich_l = 0, "Very few runners have any traceable signal"
+
+        total = data_s + form_s + size_s + type_s + rich_s
+
+        if total >= 11:
+            level = "HIGH"
+            headline = "This looks like a well-documented, analysable race."
+        elif total >= 7:
+            level = "MEDIUM"
+            headline = "Enough signal to analyse, but some gaps in the data."
+        else:
+            level = "LOW"
+            headline = "Limited data across this field — treat picks with caution."
+
+        return {
+            "level":       level,
+            "headline":    headline,
+            "total_score": total,
+            "signals": {
+                "data_coverage":  {"score": data_s, "label": data_l},
+                "form_quality":   {"score": form_s, "label": form_l},
+                "field_size":     {"score": size_s, "label": size_l},
+                "race_type":      {"score": type_s, "label": type_l},
+                "field_richness": {"score": rich_s, "label": rich_l},
+            },
+        }
+
+    # --------------------------------------------------------
     # MAIN ANALYSIS
     # --------------------------------------------------------
-    def analyze(self, race: RaceInfo, runners: List[Runner]):
+    def analyze(self, race: RaceInfo, runners: List[Runner],
+                odds: Optional[Dict[str, str]] = None):
 
         scored = []
 
@@ -752,6 +906,13 @@ class RacingAICore:
             conf_deduction = self._confidence_deduction(
                 r.trainer, r.jockey, r.name, race.race_type, race.country)
 
+            # Option 3 — Form quality: how many numeric results are in the string.
+            # A horse with no or single-run form gets reduced weight on that
+            # factor; the surplus is redistributed to structural/fitness so a
+            # blank form string can't pad the score for an unknown horse.
+            _form_digits = [c for c in (r.form or "") if c.isdigit()]
+            form_quality = min(1.0, len(_form_digits) / 2)  # 0=none 0.5=1-run 1=2+
+
             # Adaptive racecard weights: when historical data is sparse, shift
             # weight toward observable racecard factors (form, age, weight).
             # Full data → standard split.  Partial gap → moderate shift.
@@ -762,6 +923,13 @@ class RacingAICore:
                 w_base, w_form, w_age, w_wt = 0.15, 0.42, 0.22, 0.21
             else:
                 w_base, w_form, w_age, w_wt = 0.25, 0.35, 0.20, 0.20
+
+            # Thin form: redistribute unused form weight to structural factors.
+            if form_quality < 1.0:
+                _surplus = w_form * (1.0 - form_quality)
+                w_form -= _surplus
+                w_wt   += _surplus * 0.55
+                w_age  += _surplus * 0.45
 
             final_score = (
                 1.0    * w_base +
@@ -810,6 +978,43 @@ class RacingAICore:
             })
 
         scored.sort(key=lambda x: x["score"], reverse=True)
+
+        # ── Odds corroboration ───────────────────────────────────────────────
+        # When odds are provided (low-confidence races), the market acts as a
+        # second opinion.  Odds never change final_score or sort order — they
+        # only adjust displayed confidence and attach a market_flag so the
+        # writeup can reference agreement or disagreement.
+        odds_decimal: dict = {}
+        if odds:
+            for _oname, _oraw in odds.items():
+                _dec = _parse_odds(_oraw)
+                if _dec is not None:
+                    odds_decimal[_oname.lower().strip()] = _dec
+
+        if odds_decimal:
+            _mkt_sorted = sorted(
+                scored,
+                key=lambda h: odds_decimal.get(h["name"].lower().strip(), 9999.0),
+            )
+            _mkt_rank = {h["name"]: i for i, h in enumerate(_mkt_sorted)}
+            for _mrank, _horse in enumerate(scored):
+                _dec = odds_decimal.get(_horse["name"].lower().strip())
+                if _dec is None:
+                    continue
+                _mpos = _mkt_rank.get(_horse["name"], len(scored))
+                if _mrank == 0:
+                    if _dec > 51.0:           # 50/1+ — market strongly disagrees
+                        _horse["confidence"] = max(70, _horse["confidence"] - 5)
+                        _horse["market_flag"] = "model_vs_market"
+                    elif _mpos == 0:          # also market favourite — agree
+                        _horse["confidence"] = min(95, _horse["confidence"] + 3)
+                        _horse["market_flag"] = "market_confirms"
+                    elif _mpos <= 2:          # near-agreement
+                        _horse["confidence"] = min(95, _horse["confidence"] + 1)
+                        _horse["market_flag"] = "market_near_agreement"
+                elif _mrank == 1 and _dec > 51.0:
+                    _horse["confidence"] = max(70, _horse["confidence"] - 3)
+                    _horse["market_flag"] = "model_vs_market"
 
         # Field-strength context — confidence ±1 when a horse is clearly
         # above or below the field average on official ratings.
