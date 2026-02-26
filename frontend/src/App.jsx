@@ -4,6 +4,8 @@ import RaceForm from "./components/RaceForm";
 import RunnerTable from "./components/RunnerTable";
 import PasteInput from "./components/PasteInput";
 import ResultsPanel from "./components/ResultsPanel";
+import RaceQualityBadge from "./components/RaceQualityBadge";
+import OddsInput from "./components/OddsInput";
 import Spinner from "./components/Spinner";
 
 /*
@@ -107,6 +109,31 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
+  // Race quality check state
+  const [quality, setQuality] = useState(null);       // quality check result
+  const [checkingQuality, setCheckingQuality] = useState(false);
+  const [qualityError, setQualityError] = useState(null);
+
+  // Odds — keyed by runner name, values are strings ("9/1", "evs", etc.)
+  const [odds, setOdds] = useState({});
+
+  // Reset quality + odds when the racecard changes
+  const handlePasteChange = (val) => {
+    setPasteText(val);
+    setQuality(null);
+    setOdds({});
+  };
+  const handleRaceChange = (val) => {
+    setRace(val);
+    setQuality(null);
+    setOdds({});
+  };
+  const handleRunnersChange = (val) => {
+    setRunners(val);
+    setQuality(null);
+    setOdds({});
+  };
+
   // Only require horse name + at least 2 runners for manual mode.
   const canSubmitManual =
     !loading &&
@@ -117,6 +144,77 @@ export default function App() {
 
   const canSubmit =
     inputMode === "manual" ? canSubmitManual : canSubmitPaste;
+
+  // ── Race quality check ─────────────────────────────────────────────────
+  const checkQuality = async () => {
+    setCheckingQuality(true);
+    setQualityError(null);
+    setQuality(null);
+    setOdds({});
+
+    try {
+      const url =
+        inputMode === "paste"
+          ? `${API_BASE}/race-quality-text`
+          : `${API_BASE}/race-quality`;
+
+      let payload;
+      if (inputMode === "paste") {
+        payload = {
+          race_info: {
+            course:    race.course || "Unknown",
+            country:   "UK",
+            race_type: race.race_type,
+            surface:   race.surface,
+            distance:  normalizeDistance(race.distance_str),
+            going:     race.going,
+          },
+          racecard_text: pasteText,
+        };
+      } else {
+        payload = {
+          course:    race.course || "Unknown",
+          country:   "UK",
+          race_type: race.race_type,
+          surface:   race.surface,
+          distance:  normalizeDistance(race.distance_str),
+          going:     race.going,
+          runners: runners.map((r) => ({
+            name:             r.name,
+            age:              r.age || 4,
+            weight:           normalizeWeight(r.weight_st),
+            form:             r.form.trim() || "",
+            trainer:          r.trainer || "",
+            jockey:           r.jockey || "",
+            draw:             null,
+            jockey_claim_lbs: 0,
+          })),
+        };
+      }
+
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) {
+        const raw = await res.text().catch(() => "");
+        throw new Error(extractErrorMsg(raw, res.status));
+      }
+      const data = await res.json();
+      setQuality(data);
+      // Pre-seed odds keys from returned runner names
+      if (data.runner_names) {
+        const seed = {};
+        data.runner_names.forEach((n) => { seed[n] = ""; });
+        setOdds(seed);
+      }
+    } catch (err) {
+      setQualityError(err.message || "Quality check failed");
+    } finally {
+      setCheckingQuality(false);
+    }
+  };
 
   const analyze = async () => {
     setLoading(true);
@@ -132,6 +230,12 @@ export default function App() {
       // -----------------------------------------------------------------
       let payload;
 
+      // Strip empty odds values before sending
+      const activeOdds = Object.fromEntries(
+        Object.entries(odds).filter(([, v]) => v.trim() !== "")
+      );
+      const oddsPayload = Object.keys(activeOdds).length > 0 ? activeOdds : undefined;
+
       if (inputMode === "paste") {
         // /analyze-text expects { race_info: {...}, racecard_text: "..." }
         payload = {
@@ -144,6 +248,7 @@ export default function App() {
             going:     race.going,
           },
           racecard_text: pasteText,
+          odds: oddsPayload,
         };
       } else {
         // /analyze expects flat AnalyzeRequest
@@ -165,6 +270,7 @@ export default function App() {
             draw:            null,
             jockey_claim_lbs: 0,
           })),
+          odds: oddsPayload,
         };
       }
 
@@ -232,14 +338,40 @@ export default function App() {
 
           {inputMode === "manual" ? (
             <>
-              <RaceForm race={race} onChange={setRace} />
-              <RunnerTable runners={runners} onChange={setRunners} />
+              <RaceForm race={race} onChange={handleRaceChange} />
+              <RunnerTable runners={runners} onChange={handleRunnersChange} />
             </>
           ) : (
-            <PasteInput value={pasteText} onChange={setPasteText} />
+            <PasteInput value={pasteText} onChange={handlePasteChange} />
           )}
 
-          <div className="flex justify-center">
+          {/* Race quality badge + odds panel */}
+          {quality && (
+            <RaceQualityBadge quality={quality} />
+          )}
+          {quality && (
+            <OddsInput
+              quality={quality}
+              odds={odds}
+              onChange={setOdds}
+            />
+          )}
+
+          {qualityError && (
+            <div className="bg-red-500/10 border border-red-500/40 rounded-lg p-3 text-red-400 text-sm text-center">
+              {qualityError}
+            </div>
+          )}
+
+          <div className="flex justify-center gap-3">
+            <button
+              type="button"
+              disabled={!canSubmit || checkingQuality}
+              onClick={checkQuality}
+              className="btn-secondary text-sm px-6 py-3"
+            >
+              {checkingQuality ? "Checking…" : "Check Race"}
+            </button>
             <button
               type="button"
               disabled={!canSubmit}
