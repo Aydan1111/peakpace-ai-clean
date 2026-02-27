@@ -311,13 +311,13 @@ export default function App() {
       {/* ── Hero Section ─────────────────────────────────────────────────── */}
       <div
         className="hero-section"
-        style={{ backgroundImage: "url('/images/hero-bg.jpg')" }}
+        style={{ backgroundImage: "url('/images/PeakPace AI Horse Head.png')" }}
       >
         <div className="hero-gradient" aria-hidden="true" />
         <div className="hero-content">
           <img
-            src="/images/hero-bg.jpg"
-            alt="Horse head sculpture"
+            src="/images/PeakPace AI Horse Head.png"
+            alt="PeakPace AI horse head"
             className="hero-horse-img"
           />
           <h1 className="hero-title">
