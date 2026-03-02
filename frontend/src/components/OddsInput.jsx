@@ -1,18 +1,13 @@
 import { useState } from "react";
 
 /**
- * Odds input panel — surfaces automatically when quality is LOW,
- * and is available as a collapsible option for MEDIUM races too.
- * Not shown for HIGH confidence races where it adds little value.
+ * Odds input panel — shown when runner names are available.
+ * Collapsed by default; user can expand to enter market odds.
  */
-export default function OddsInput({ quality, odds, onChange }) {
-  const runnerNames = quality?.runner_names || [];
-  const level = quality?.level;
+export default function OddsInput({ runnerNames = [], odds, onChange }) {
+  const [open, setOpen] = useState(false);
 
-  // Auto-expand for LOW races; collapsed by default otherwise
-  const [open, setOpen] = useState(level === "LOW");
-
-  if (level === "HIGH" || runnerNames.length === 0) return null;
+  if (runnerNames.length === 0) return null;
 
   const handleChange = (name, val) => {
     onChange({ ...odds, [name]: val });
@@ -27,9 +22,7 @@ export default function OddsInput({ quality, odds, onChange }) {
             <span className="text-text-dim font-normal text-xs">(optional)</span>
           </p>
           <p className="text-xs text-text-dim mt-0.5">
-            {level === "LOW"
-              ? "Limited data detected — market odds help the AI cross-check its picks."
-              : "Market odds let the AI flag any disagreements with its analysis."}
+            Market odds let the AI flag any disagreements with its analysis.
           </p>
         </div>
         <button
