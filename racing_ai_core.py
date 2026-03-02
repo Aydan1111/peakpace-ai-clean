@@ -694,13 +694,13 @@ class RacingAICore:
     # --------------------------------------------------------
     def _going_penalty(self, runner: Runner, going: str,
                        race_type: str = "", country: str = "") -> int:
-        """Small confidence deduction when going is testing (soft/heavy/good-to-soft).
+        """Confidence deduction when going is testing (soft/heavy/good-to-soft).
 
-        Does NOT touch score or ranking — confidence only.
-        Deductions (max combined 4):
-          +2  horse has fewer than 8 career runs (inexperience on testing ground)
+        Also applies a small score reduction in the caller.
+        Deductions (max combined 5):
+          +2  horse has fewer than 10 career runs (inexperience on testing ground)
                OR has no historical stats at all
-          +2  horse carries more than 138 lbs net (heavy burden harder on soft)
+          +3  horse carries more than 135 lbs net (heavy burden harder on soft)
         """
         if going.lower().strip() not in _TESTING_GOING:
             return 0
@@ -718,16 +718,16 @@ class RacingAICore:
             stats = (_HORSE_STATS_NH if is_nh_flag
                      else _HORSE_STATS_FLAT).get(name)
 
-        # No data at all, or very few career runs → uncertain on testing ground
-        if stats is None or stats["runs"] < 8:
+        # No data at all, or fewer than 10 career runs → uncertain on testing ground
+        if stats is None or stats["runs"] < 10:
             penalty += 2
 
         # High net weight is a greater physical burden on soft/heavy ground
         net_weight = runner.weight_lbs - runner.jockey_claim_lbs
-        if net_weight > 138:
-            penalty += 2
+        if net_weight > 135:
+            penalty += 3
 
-        return min(penalty, 4)
+        return min(penalty, 5)
 
     # --------------------------------------------------------
     # RAW RATING LOOKUP (for field-context calculation)
@@ -952,6 +952,10 @@ class RacingAICore:
 
             going_pen = self._going_penalty(r, race.going, race.race_type,
                                             race.country)
+            # Score reduction for testing ground: 1% per penalty point,
+            # floor at 0.95 (~5% max reduction on score).
+            if going_pen > 0:
+                final_score *= max(0.95, 1.0 - going_pen * 0.01)
             confidence = min(95, max(70, int(final_score * 80)
                                      - conf_deduction - going_pen))
 
