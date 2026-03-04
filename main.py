@@ -138,6 +138,16 @@ FIELD_KEYS = re.compile(
 # e.g. "Recent Form: 123" — "Recent" must not become a runner.
 _LABEL_NOISE = frozenset({"recent", "last", "previous", "latest", "current"})
 
+# Racing Post / racecard metadata lines that are NOT horse names and should be
+# silently skipped rather than treated as new runner boundaries.
+_NOISE_PREFIX_RE = re.compile(
+    r"^(official\s+rating|pedigree|bred|colour|color|sex|owner|"
+    r"prize|silks|rpr|or|sire|dam|breeder|rating|ran|p\.?p\.?|"
+    r"weight\s+carried|trainer\s+form|jockey\s+form|stable|"
+    r"date\s*\|?\s*course)\s*[:\|]",
+    re.I,
+)
+
 
 def _extract_fields(current: dict, text: str):
     """Pull Age/Weight/Trainer/Jockey/Form from a text fragment.
@@ -165,7 +175,7 @@ def _extract_fields(current: dict, text: str):
         m = re.search(r"jockey[:\s]+(.+)", token, re.I)
         if m:
             current["jockey"] = m.group(1).strip()
-        m = re.search(r"(?:^f|form)[:\s]+([0-9/\-]+)", token, re.I)
+        m = re.search(r"(?:^f|form)[:\s]+([0-9A-Za-z/\-]+)", token, re.I)
         if m:
             current["form"] = m.group(1)
         m = re.search(r"comment[:\s]+(.+)", token, re.I)
@@ -198,7 +208,7 @@ _DISCIPLINE_RE = re.compile(
 
 # Recognise going labels within a previous-run line segment
 _GOING_WORDS = re.compile(
-    r"\b(heavy|soft|good\s+to\s+soft|good\s+to\s+firm|good|firm|"
+    r"\b(heavy|soft|good\s+to\s+soft|good\s+soft|good\s+to\s+firm|good|firm|"
     r"standard|yielding|soft\s+to\s+heavy|yielding\s+to\s+soft)\b", re.I
 )
 
@@ -216,8 +226,8 @@ def _parse_prev_run_line(line: str) -> Optional[dict]:
     if not re.match(r"\w{3}\s+\d{1,2}\s+\d{2,4}", line.strip(), re.I):
         return None
 
-    # Split on em-dash / en-dash / spaced hyphen
-    parts = re.split(r"\s*[—–]\s*|\s+-\s+", line)
+    # Split on em-dash / en-dash / spaced hyphen / pipe (|)
+    parts = re.split(r"\s*[—–]\s*|\s+-\s+|\s*\|\s*", line)
     if len(parts) < 4:
         return None
 
@@ -277,22 +287,55 @@ def parse_racecard_text(text: str) -> list:
     runners = []
     current: dict = {}
     in_prev_runs = False
+    comment_pending = False   # True when "COMMENT:" appeared alone on previous line
 
     for line in lines:
+        # ── HORSE: prefix (Racing Post style) ────────────────────────────────
+        # e.g. "HORSE: Karamoja" → name = "Karamoja"
+        horse_m = re.match(r"^HORSE\s*:\s*(.+)", line, re.I)
+        if horse_m:
+            if current and "name" in current:
+                runners.append(current)
+            current = {"name": horse_m.group(1).strip()}
+            in_prev_runs = False
+            comment_pending = False
+            continue
+
+        # ── Known Racing Post metadata lines — skip silently ─────────────────
+        # e.g. "PEDIGREE: ...", "BRED: F", "OFFICIAL RATING: 0"
+        # These must NOT become runner-name boundaries.
+        if _NOISE_PREFIX_RE.match(line):
+            continue
+
+        # ── Comment text on the line following a bare "COMMENT:" label ───────
+        if comment_pending and current:
+            current["comment"] = line.strip().strip('"').strip("'")
+            comment_pending = False
+            continue
+
         # ── Previous runs section header ─────────────────────────────────────
-        if re.match(r"previous\s+runs?\s*:?", line, re.I):
+        # Accepts: "Previous runs:", "Previous run:", "Recent runs:", "Recent run:"
+        if re.match(r"(?:previous|recent)\s+runs?\s*:?", line, re.I):
             in_prev_runs = True
             current.setdefault("previous_runs", [])
             continue
 
         # ── Previous run record ──────────────────────────────────────────────
         if in_prev_runs and current:
+            # Skip column-header lines (e.g. "Date | Course | Distance | …")
+            if re.match(r"^date\b", line, re.I):
+                continue
             pr = _parse_prev_run_line(line)
             if pr is not None:
                 current["previous_runs"].append(pr)
                 continue
             else:
                 in_prev_runs = False   # non-matching line exits the section
+
+        # ── Bare "COMMENT:" label with no inline text ─────────────────────────
+        if re.match(r"^comment\s*:\s*$", line, re.I):
+            comment_pending = True
+            continue
 
         # ── Normal field parsing ─────────────────────────────────────────────
         first_field = FIELD_KEYS.search(line)
