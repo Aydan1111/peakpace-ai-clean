@@ -4,6 +4,7 @@
 
 import os
 import re
+import math
 from dataclasses import dataclass
 from typing import List, Dict, Optional
 import statistics
@@ -912,6 +913,56 @@ class RacingAICore:
         }
 
     # --------------------------------------------------------
+    # ODDS INTELLIGENCE LAYER
+    # --------------------------------------------------------
+    @staticmethod
+    def _odds_multiplier(norm_name: str,
+                         norm_probs: Dict[str, float],
+                         n_with_odds: int,
+                         coverage: float) -> float:
+        """Compute a small score adjustment from field-relative implied probability.
+
+        Uses the runner's normalized implied probability (raw implied prob divided
+        by the field total, removing bookmaker overround) relative to the field
+        average (1 / n_with_odds).
+
+        ratio = norm_prob / avg_prob
+          > 1  → shorter-priced than average → small positive
+          = 1  → exactly average price       → neutral
+          < 1  → longer-priced than average  → small negative
+
+        A log curve is applied so the adjustment tapers smoothly:
+          log(ratio) is positive for short-priced runners, negative for outsiders.
+
+        Sensitivity (k) and cap scale with data coverage:
+          Normal coverage (≥0.5): k=0.025, cap=±0.030 → multiplier [0.97, 1.03]
+          Low coverage (0.0):     k=0.060, cap=±0.060 → multiplier [0.94, 1.06]
+
+        Returns 1.0 if odds are unavailable or the field has fewer than 2 prices.
+        """
+        if not norm_probs or n_with_odds < 2:
+            return 1.0
+        prob = norm_probs.get(norm_name)
+        if prob is None:
+            return 1.0
+
+        avg_prob = 1.0 / n_with_odds
+        ratio    = prob / avg_prob          # 1.0 = market-average price
+
+        # Scale sensitivity and cap from coverage
+        if coverage < 0.5:
+            strength = 1.0 - coverage / 0.5          # 0.0 at cov=0.5, 1.0 at cov=0
+            k   = 0.025 + 0.035 * strength            # 0.025 → 0.060
+            cap = 0.030 + 0.030 * strength            # 0.030 → 0.060
+        else:
+            k   = 0.025
+            cap = 0.030
+
+        delta = k * math.log(max(ratio, 0.01))        # log(0) guard
+        delta = max(-cap, min(cap, delta))
+        return round(1.0 + delta, 5)
+
+    # --------------------------------------------------------
     # RACECARD INTELLIGENCE LAYER
     # --------------------------------------------------------
     def _racecard_intel_multiplier(self, runner: Runner,
@@ -1062,6 +1113,24 @@ class RacingAICore:
 
         scored = []
 
+        # ── Pre-process odds ─────────────────────────────────────────────────
+        # Parse once before the loop; derive field-relative normalized implied
+        # probabilities so each runner's odds signal is independent of
+        # bookmaker overround and field size.
+        _odds_decimal: Dict[str, float] = {}   # norm_name → decimal odds
+        _norm_prob:    Dict[str, float] = {}   # norm_name → normalized implied prob
+        if odds:
+            _raw_probs: Dict[str, float] = {}
+            for _oname, _oraw in odds.items():
+                _dec = _parse_odds(_oraw)
+                if _dec is not None and _dec >= 1.01:
+                    _key = _normalize_name(_oname)
+                    _odds_decimal[_key] = _dec
+                    _raw_probs[_key]    = 1.0 / _dec
+            if len(_raw_probs) >= 2:
+                _total     = sum(_raw_probs.values())
+                _norm_prob = {k: v / _total for k, v in _raw_probs.items()}
+
         for r in runners:
 
             form    = self.form_score(r.form)
@@ -1169,6 +1238,16 @@ class RacingAICore:
                                            1.0 + rc_edge * (1.0 + (0.5 - coverage))))
                 final_score *= rc_mult
 
+            # ── Odds intelligence layer ──────────────────────────────────────
+            # Field-relative implied probability used as a small contextual
+            # signal.  Prevents extreme outsiders from ranking unrealistically
+            # high due to random signal combinations.  More influential when
+            # historical data coverage is low.  Defaults to 1.0 if no odds.
+            odds_mult = self._odds_multiplier(
+                _normalize_name(r.name), _norm_prob, len(_norm_prob), coverage)
+            if odds_mult != 1.0:
+                final_score *= odds_mult
+
             going_pen = self._going_penalty(r, race.going, race.race_type,
                                             race.country)
             # Score reduction for testing ground: 1% per penalty point,
@@ -1203,37 +1282,29 @@ class RacingAICore:
 
         scored.sort(key=lambda x: x["score"], reverse=True)
 
-        # ── Odds corroboration ───────────────────────────────────────────────
-        # When odds are provided (low-confidence races), the market acts as a
-        # second opinion.  Odds never change final_score or sort order — they
-        # only adjust displayed confidence and attach a market_flag so the
-        # writeup can reference agreement or disagreement.
-        odds_decimal: dict = {}
-        if odds:
-            for _oname, _oraw in odds.items():
-                _dec = _parse_odds(_oraw)
-                if _dec is not None:
-                    odds_decimal[_oname.lower().strip()] = _dec
-
-        if odds_decimal:
+        # ── Odds corroboration (post-sort) ───────────────────────────────────
+        # Reuses _odds_decimal and _norm_prob pre-computed before the loop.
+        # Adjusts displayed confidence and attaches market_flag.
+        # Sort order is already odds-aware (odds multiplier applied per-runner).
+        if _odds_decimal:
             _mkt_sorted = sorted(
                 scored,
-                key=lambda h: odds_decimal.get(h["name"].lower().strip(), 9999.0),
+                key=lambda h: _odds_decimal.get(_normalize_name(h["name"]), 9999.0),
             )
             _mkt_rank = {h["name"]: i for i, h in enumerate(_mkt_sorted)}
             for _mrank, _horse in enumerate(scored):
-                _dec = odds_decimal.get(_horse["name"].lower().strip())
+                _dec = _odds_decimal.get(_normalize_name(_horse["name"]))
                 if _dec is None:
                     continue
                 _mpos = _mkt_rank.get(_horse["name"], len(scored))
                 if _mrank == 0:
-                    if _dec > 51.0:           # 50/1+ — market strongly disagrees
+                    if _dec > 51.0:       # 50/1+ — market still strongly disagrees
                         _horse["confidence"] = max(70, _horse["confidence"] - 5)
                         _horse["market_flag"] = "model_vs_market"
-                    elif _mpos == 0:          # also market favourite — agree
+                    elif _mpos == 0:      # market and model both favour same horse
                         _horse["confidence"] = min(95, _horse["confidence"] + 3)
                         _horse["market_flag"] = "market_confirms"
-                    elif _mpos <= 2:          # near-agreement
+                    elif _mpos <= 2:
                         _horse["confidence"] = min(95, _horse["confidence"] + 1)
                         _horse["market_flag"] = "market_near_agreement"
                 elif _mrank == 1 and _dec > 51.0:
@@ -1274,6 +1345,20 @@ class RacingAICore:
                 race_confidence = "MEDIUM"
         elif len(scored) == 1:
             race_confidence = "MEDIUM"
+
+        # Market structure nudge — applies only when field-wide odds are present.
+        # A dominant market favourite that the model also selects strengthens
+        # confidence; a very open market with no clear favourite weakens it.
+        if _norm_prob and len(_norm_prob) >= 2:
+            _avg_p      = 1.0 / len(_norm_prob)
+            _max_p      = max(_norm_prob.values())
+            _top_model_p = _norm_prob.get(_normalize_name(scored[0]["name"]), 0.0)
+            # Model's top pick is the market's clear favourite (>2.5× average)
+            if _top_model_p >= 2.5 * _avg_p and race_confidence == "MEDIUM":
+                race_confidence = "HIGH"
+            # Very open market — no runner priced above 1.5× average → MEDIUM
+            if _max_p < 1.5 * _avg_p and race_confidence == "HIGH":
+                race_confidence = "MEDIUM"
 
         # Helper to build a writeup from a scored entry
         def _wp(entry):

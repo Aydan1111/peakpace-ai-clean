@@ -64,6 +64,35 @@ FALLBACK_RACES = 50
 
 # ── Helpers ────────────────────────────────────────────────────────────────
 
+# Plausible fractional odds pools by role
+_FAVOURITE_ODDS   = ["2/1", "5/2", "3/1", "7/2", "4/1"]
+_MID_ODDS         = ["5/1", "6/1", "7/1", "8/1", "10/1", "12/1"]
+_OUTSIDER_ODDS    = ["14/1", "16/1", "20/1", "25/1", "33/1"]
+_EXTREME_ODDS     = ["40/1", "50/1", "66/1", "80/1", "100/1"]
+
+
+def _synthetic_odds(runners: list[Runner],
+                    favourite_name: str,
+                    outsider_name: str | None = None) -> dict[str, str]:
+    """Build a plausible odds dict for a synthetic race.
+
+    * favourite_name gets a short price
+    * outsider_name (if given) gets an extreme price
+    * remaining runners get mid-range or outsider prices
+    """
+    result: dict[str, str] = {}
+    for r in runners:
+        if r.name == favourite_name:
+            result[r.name] = random.choice(_FAVOURITE_ODDS)
+        elif outsider_name and r.name == outsider_name:
+            result[r.name] = random.choice(_EXTREME_ODDS)
+        else:
+            # 60% mid, 40% outsider for the rest of the field
+            pool = _MID_ODDS if random.random() < 0.6 else _OUTSIDER_ODDS
+            result[r.name] = random.choice(pool)
+    return result
+
+
 def _random_weight_lbs() -> int:
     """Return a plausible race weight in lbs (9st–11st 10lb = 126–164 lbs)."""
     return random.randint(126, 164)
@@ -133,7 +162,9 @@ def run_simulation() -> None:
             runners=len(field),
         )
 
-        result = engine.analyze(race, field)
+        # Generate synthetic odds with the strong horse as market favourite
+        race_odds = _synthetic_odds(field, strong_name)
+        result = engine.analyze(race, field, odds=race_odds)
 
         race_conf = result.get("race_confidence", "LOW")
         confidence_dist[race_conf] = confidence_dist.get(race_conf, 0) + 1
@@ -439,7 +470,73 @@ def test_racecard_signals() -> None:
     print("=" * 60)
 
 
+def test_outsider_suppression() -> None:
+    """Verify that extreme outsiders (40/1+) are almost never selected as top pick.
+
+    Each race contains one runner deliberately assigned extreme odds (40–100/1)
+    but with average form and connections (no other handicaps).  The model
+    should rarely promote this horse to the top pick despite normal scoring.
+    """
+    OUTSIDER_RACES  = 50
+    outsider_top1   = 0
+    outsider_top3   = 0
+
+    for race_idx in range(OUTSIDER_RACES):
+        n_runners     = random.randint(8, 12)
+        outsider_name = f"Outsider {race_idx}"
+
+        # Build field — outsider has normal average form, not deliberately weak
+        field = [_make_runner(f"Normal {race_idx}_{j}") for j in range(n_runners - 1)]
+        outsider = _make_runner(outsider_name, quality="normal")
+        field.insert(random.randint(0, len(field)), outsider)
+
+        # Choose a random favourite (not the outsider)
+        others      = [r for r in field if r.name != outsider_name]
+        fav_runner  = random.choice(others)
+
+        race = RaceInfo(
+            course=random.choice(COURSES),
+            country="UK",
+            race_type="flat",
+            surface="turf",
+            distance_f=8.0,
+            going="good",
+            runners=len(field),
+        )
+
+        race_odds = _synthetic_odds(field, fav_runner.name, outsider_name=outsider_name)
+        result    = engine.analyze(race, field, odds=race_odds)
+
+        rankings     = result.get("full_rankings", [])
+        ranked_names = [e["name"] for e in rankings]
+
+        if ranked_names and ranked_names[0] == outsider_name:
+            outsider_top1 += 1
+        if outsider_name in ranked_names[:3]:
+            outsider_top3 += 1
+
+    top1_pct = round(outsider_top1 / OUTSIDER_RACES * 100, 1)
+    top3_pct = round(outsider_top3 / OUTSIDER_RACES * 100, 1)
+
+    print()
+    print("=" * 60)
+    print("Outsider Suppression Test — extreme odds (40/1+)")
+    print("=" * 60)
+    print(f"Races simulated              : {OUTSIDER_RACES}")
+    print(f"Outsider selected as Top 1   : {outsider_top1} races  ({top1_pct}%)")
+    print(f"Outsider in Top 3            : {outsider_top3} races  ({top3_pct}%)")
+    print("=" * 60)
+
+    assert top1_pct <= 10, (
+        f"FAIL: extreme outsider was top pick in {top1_pct}% of races "
+        f"(expected ≤10%) — odds suppression may not be working"
+    )
+    print(f"PASS: outsider top-1 rate = {top1_pct}%  (threshold ≤10%)")
+    print("=" * 60)
+
+
 if __name__ == "__main__":
     run_simulation()
     test_fallback_logic()
     test_racecard_signals()
+    test_outsider_suppression()
