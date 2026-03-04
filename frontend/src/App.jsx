@@ -77,6 +77,41 @@ function normalizeDistance(str) {
   return isNaN(n) ? "8f" : `${n}f`;
 }
 
+/**
+ * Convert a distance string ("2m4f", "1m", "8f", "2m 4f 29y") to furlongs.
+ * Used when building previous_runs for the engine.
+ */
+function distToFurlongs(str) {
+  const s = (str || "").toLowerCase();
+  const mMatch = s.match(/(\d+)\s*m/);
+  const fMatch = s.match(/(\d+)\s*f/);
+  const yMatch = s.match(/(\d+)\s*y/);
+  const miles    = mMatch ? parseInt(mMatch[1]) : 0;
+  const furlongs = fMatch ? parseInt(fMatch[1]) : 0;
+  const yards    = yMatch ? parseInt(yMatch[1]) : 0;
+  return miles * 8 + furlongs + yards / 220;
+}
+
+/**
+ * Convert the UI previous_runs array (strings) into the engine format
+ * ({distance_f, going, pos, field_size, discipline}).
+ * Rows missing pos or field_size are dropped.
+ */
+function buildPrevRuns(uiRuns) {
+  if (!uiRuns || uiRuns.length === 0) return null;
+  const converted = uiRuns
+    .filter((pr) => pr.pos && pr.field_size)
+    .map((pr) => ({
+      distance_f:  distToFurlongs(pr.distance),
+      going:       (pr.going || "good").toLowerCase(),
+      pos:         parseInt(pr.pos)        || 1,
+      field_size:  parseInt(pr.field_size) || 10,
+      discipline:  pr.discipline || "flat",
+    }))
+    .filter((pr) => pr.distance_f > 0);
+  return converted.length > 0 ? converted : null;
+}
+
 // ---------------------------------------------------------------------------
 // Defaults
 // ---------------------------------------------------------------------------
@@ -90,9 +125,9 @@ const DEFAULT_RACE = {
 };
 
 const DEFAULT_RUNNERS = [
-  { name: "", age: 4, weight_st: "9-4", form: "", trainer: "", jockey: "" },
-  { name: "", age: 4, weight_st: "9-4", form: "", trainer: "", jockey: "" },
-  { name: "", age: 4, weight_st: "9-4", form: "", trainer: "", jockey: "" },
+  { name: "", age: 4, weight_st: "9-4", form: "", trainer: "", jockey: "", equipment: "", comment: "", previous_runs: [] },
+  { name: "", age: 4, weight_st: "9-4", form: "", trainer: "", jockey: "", equipment: "", comment: "", previous_runs: [] },
+  { name: "", age: 4, weight_st: "9-4", form: "", trainer: "", jockey: "", equipment: "", comment: "", previous_runs: [] },
 ];
 
 // ---------------------------------------------------------------------------
@@ -185,14 +220,17 @@ export default function App() {
           distance:  normalizeDistance(race.distance_str),
           going:     race.going,
           runners: runners.map((r) => ({
-            name:            r.name,
-            age:             r.age || 4,
-            weight:          normalizeWeight(r.weight_st),
-            form:            r.form.trim() || "",
-            trainer:         r.trainer || "",
-            jockey:          r.jockey || "",
-            draw:            null,
+            name:             r.name,
+            age:              r.age || 4,
+            weight:           normalizeWeight(r.weight_st),
+            form:             r.form.trim() || "",
+            trainer:          r.trainer || "",
+            jockey:           r.jockey || "",
+            draw:             null,
             jockey_claim_lbs: 0,
+            equipment:        r.equipment || "",
+            comment:          r.comment   || "",
+            previous_runs:    buildPrevRuns(r.previous_runs),
           })),
           odds: oddsPayload,
           dark_horse_enabled: darkHorseEnabled,
