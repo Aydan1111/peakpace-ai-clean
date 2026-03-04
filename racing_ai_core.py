@@ -380,6 +380,11 @@ _UK_JOCKEY_FALLBACK: Dict[str, float] = {
 
 class RacingAICore:
 
+    # Set to True to include a dark horse pick in analyze() output.
+    # When False (default), only gold and silver picks are returned;
+    # the dark horse is still evaluated internally but suppressed.
+    dark_horse_enabled: bool = False
+
     # --------------------------------------------------------
     # TRAINER POWER
     # --------------------------------------------------------
@@ -1395,10 +1400,31 @@ class RacingAICore:
         gold_name   = gold_entry["name"]   if gold_entry   else None
         silver_name = silver_entry["name"] if silver_entry else None
 
-        # Dark horse: lowest-scored runner that is neither gold nor silver
+        # Dark horse: value pick from model ranks 3–6 that satisfies all three
+        # criteria — odds in range [6/1, 33/1], score ≥ 85% of gold, not already
+        # a main pick.  Only populated when dark_horse_enabled is True; otherwise
+        # the selection is skipped entirely so output stays Gold + Silver only.
         dark = None
-        for candidate in reversed(scored):
-            if candidate["name"] != gold_name and candidate["name"] != silver_name:
+        if self.dark_horse_enabled:
+            _dh_min_dec     = 7.0    # 6/1  in decimal
+            _dh_max_dec     = 34.0   # 33/1 in decimal
+            _dh_score_floor = 0.85 * (gold_entry["score"] if gold_entry else 0.0)
+            _main_names     = {gold_name, silver_name}
+            for _dh_rank, candidate in enumerate(scored):
+                if _dh_rank < 2:
+                    continue                      # ranks 1 & 2 are gold/silver
+                if _dh_rank > 5:
+                    break                         # only consider ranks 3–6
+                if candidate["name"] in _main_names:
+                    continue
+                if candidate["score"] < _dh_score_floor:
+                    continue
+                _cand_dec = _odds_decimal.get(_normalize_name(candidate["name"]))
+                if _cand_dec is None:
+                    continue                      # odds required for dark horse
+                if not (_dh_min_dec <= _cand_dec <= _dh_max_dec):
+                    continue
+                # First qualifying candidate (highest-scored among ranks 3–6)
                 dark = {**candidate, "label": "Value Play",
                         "writeup": _wp(candidate)}
                 break
