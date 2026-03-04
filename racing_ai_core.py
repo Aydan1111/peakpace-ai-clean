@@ -34,6 +34,10 @@ class Runner:
     jockey: str
     draw: int = None
     jockey_claim_lbs: int = 0
+    # Optional racecard intelligence fields
+    comment: str = ""         # analyst/Racing Post comment text
+    equipment: str = ""       # equipment notes (e.g. "tongue strap", "hood removed")
+    previous_runs: Optional[List[dict]] = None  # list of {going, distance_f, pos, field_size, discipline}
 
 
 # ============================================================
@@ -192,6 +196,16 @@ def _is_nh(race_type: str) -> bool:
         return False
     rt = race_type.lower()
     return any(k in rt for k in _NH_KEYWORDS)
+
+
+def _going_bucket(going: str) -> str:
+    """Bucket a going string into 'soft', 'good', or 'firm' for comparison."""
+    g = going.lower()
+    if any(x in g for x in ("heavy", "soft", "yielding")):
+        return "soft"
+    if any(x in g for x in ("firm", "standard", "fast", "hard")):
+        return "firm"
+    return "good"
 
 
 # ============================================================
@@ -898,6 +912,149 @@ class RacingAICore:
         }
 
     # --------------------------------------------------------
+    # RACECARD INTELLIGENCE LAYER
+    # --------------------------------------------------------
+    def _racecard_intel_multiplier(self, runner: Runner,
+                                   race: RaceInfo) -> float:
+        """Derive a small score multiplier from racecard intelligence signals.
+
+        Six signal families — each contributes a signed delta.
+        Total clamped to [0.94, 1.06] so racecard data never dominates.
+
+        A. Distance suitability (previous_runs)
+        B. Going preference (previous_runs)
+        C. Field-adjusted form (previous_runs)
+        D. Discipline change penalty (hurdle→chase debut)
+        E. Equipment signals (comment/equipment string)
+        F. Comment keyword signals
+        """
+        delta = 0.0
+        prev  = runner.previous_runs or []
+
+        # ── A. Distance suitability ──────────────────────────────────────────
+        if prev:
+            dists = [p["distance_f"] for p in prev
+                     if isinstance(p.get("distance_f"), (int, float))
+                     and p["distance_f"] > 0]
+            if dists:
+                median_d = statistics.median(dists)
+                gap = abs(float(race.distance_f) - median_d)
+                if gap <= 1.0:
+                    delta += 0.025   # ran at almost identical trip
+                elif gap <= 3.0:
+                    delta += 0.010   # within 3f — familiar territory
+                elif gap > 5.0:
+                    delta -= 0.015   # significant step up/down in trip
+
+        # ── B. Going preference ──────────────────────────────────────────────
+        if prev:
+            curr_bucket = _going_bucket(race.going)
+            same = [p for p in prev
+                    if _going_bucket(p.get("going", "")) == curr_bucket
+                    and isinstance(p.get("pos"), int)
+                    and isinstance(p.get("field_size"), int)
+                    and p["field_size"] > 1]
+            if len(same) >= 2:
+                # Relative finishing position on today's going type
+                avg_rel = statistics.mean(
+                    p["pos"] / p["field_size"] for p in same
+                )
+                if avg_rel <= 0.30:
+                    delta += 0.020   # top 30% on this going — genuine preference
+                elif avg_rel <= 0.50:
+                    delta += 0.010   # above average on this going
+            elif len(same) == 0 and len(prev) >= 3:
+                delta -= 0.010       # never run on today's going — uncertainty
+
+        # ── C. Field-adjusted form ───────────────────────────────────────────
+        # Normalises finishing position by field size — catches big-field 5ths
+        # that are better than a small-field 3rd.
+        if prev and len(prev) >= 2:
+            adj = []
+            for p in prev:
+                pos = p.get("pos")
+                fs  = p.get("field_size")
+                if isinstance(pos, int) and isinstance(fs, int) and fs > 1:
+                    adj.append(1.0 - (pos - 1) / (fs - 1))
+            if adj:
+                avg_adj = statistics.mean(adj)
+                if avg_adj >= 0.80:
+                    delta += 0.020   # consistently in the top 20% of fields
+                elif avg_adj >= 0.65:
+                    delta += 0.010   # solidly above average
+                elif avg_adj <= 0.25:
+                    delta -= 0.015   # consistently at the back of fields
+
+        # ── D. Discipline change penalty ─────────────────────────────────────
+        if prev:
+            rt = race.race_type.lower()
+            if "chase" in rt:
+                chase_runs  = [p for p in prev
+                               if "chase" in p.get("discipline", "").lower()]
+                hurdle_runs = [p for p in prev
+                               if "hurdle" in p.get("discipline", "").lower()]
+                if len(chase_runs) == 0 and len(hurdle_runs) > 0:
+                    delta -= 0.025   # chase debut/very inexperienced over fences
+                    # Partial offset if comment suggests shaped well at debut
+                    cmt = (runner.comment or "").lower()
+                    if any(kw in cmt for kw in
+                           ("shaped", "promising", "jumped", "schooled")):
+                        delta += 0.010
+
+        # ── E. Equipment signals ──────────────────────────────────────────────
+        equip = (runner.equipment or "").lower()
+        if equip:
+            if any(kw in equip for kw in
+                   ("blinkers", "cheekpieces", "visor", "first time")):
+                delta += 0.020       # focus aid added — often a positive change
+            elif "hood removed" in equip or ("hood" in equip and "remov" in equip):
+                delta += 0.015       # Racing Post often flags hood removal as positive
+            elif any(kw in equip for kw in ("tongue strap", "tongue tie")):
+                delta += 0.010       # routine breathing aid — mild positive signal
+
+        # ── F. Comment keyword signals ───────────────────────────────────────
+        cmt = (runner.comment or "").lower()
+        if cmt:
+            # Positive — take the first matching signal to avoid double-counting
+            _pos = [
+                ("keeps the faith",  0.025),  # jockey sticking with horse
+                ("significant",      0.020),
+                ("progressive",      0.020),
+                ("improving",        0.020),
+                ("eye-catching",     0.020),
+                ("well treated",     0.020),
+                ("well handicapped", 0.020),
+                ("lightly raced",    0.015),
+                ("promising",        0.015),
+                ("bounce back",      0.015),
+                ("needed run",       0.015),  # next run expected to be sharper
+                ("step up",          0.010),
+                ("returns to",       0.010),
+            ]
+            for kw, boost in _pos:
+                if kw in cmt:
+                    delta += boost
+                    break
+
+            # Negative — independent of the positive scan
+            _neg = [
+                ("heavily eased",  -0.030),
+                ("distressed",     -0.025),
+                ("amiss",          -0.020),
+                ("pulled up",      -0.020),
+                ("disappointed",   -0.020),
+                ("failed off",     -0.020),
+                ("fell",           -0.015),
+                ("unseated",       -0.015),
+            ]
+            for kw, penalty in _neg:
+                if kw in cmt:
+                    delta += penalty
+                    break
+
+        return max(0.94, min(1.06, 1.0 + delta))
+
+    # --------------------------------------------------------
     # MAIN ANALYSIS
     # --------------------------------------------------------
     def analyze(self, race: RaceInfo, runners: List[Runner],
@@ -997,6 +1154,20 @@ class RacingAICore:
                 # Max additional effect ≈ ±8% for a 10% connection edge.
                 extra = connections_mult ** (fallback_strength * 0.8)
                 final_score *= extra
+
+            # ── Racecard intelligence layer ──────────────────────────────────
+            # Secondary signals from previous_runs, equipment, and comment text.
+            # Applied at face value when data coverage is good; scaled up by
+            # up to 1.5× when coverage is low (racecard data is then the best
+            # available signal for the runner).
+            rc_mult = self._racecard_intel_multiplier(r, race)
+            if rc_mult != 1.0:
+                if coverage < 0.5:
+                    rc_edge = rc_mult - 1.0
+                    # Amplify: more racecard influence at lower coverage
+                    rc_mult = max(0.92, min(1.08,
+                                           1.0 + rc_edge * (1.0 + (0.5 - coverage))))
+                final_score *= rc_mult
 
             going_pen = self._going_penalty(r, race.going, race.race_type,
                                             race.country)
