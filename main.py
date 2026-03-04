@@ -78,6 +78,9 @@ class RunnerInput(BaseModel):
     jockey: str
     draw: Optional[int] = None
     jockey_claim_lbs: Optional[int] = 0
+    comment: Optional[str] = ""
+    equipment: Optional[str] = ""
+    previous_runs: Optional[List[dict]] = None
 
 
 class AnalyzeRequest(BaseModel):
@@ -126,7 +129,7 @@ class RaceQualityTextRequest(BaseModel):
 # -------------------------------------------------
 
 FIELD_KEYS = re.compile(
-    r"(Age|Weight|Trainer|Jockey|Form|F)\s*:", re.I
+    r"(Age|Weight|Trainer|Jockey|Form|F|Comment|Equipment)\s*:", re.I
 )
 
 # Words that can appear directly before a field key but are NOT horse names.
@@ -163,6 +166,93 @@ def _extract_fields(current: dict, text: str):
         m = re.search(r"(?:^f|form)[:\s]+([0-9/\-]+)", token, re.I)
         if m:
             current["form"] = m.group(1)
+        m = re.search(r"comment[:\s]+(.+)", token, re.I)
+        if m:
+            current["comment"] = m.group(1).strip().strip('"').strip("'")
+        m = re.search(r"equipment[:\s]+(.+)", token, re.I)
+        if m:
+            current["equipment"] = m.group(1).strip()
+
+
+def _prev_dist_to_furlongs(dist_str: str) -> Optional[float]:
+    """Convert distance strings like '2m 4f 29y' or '1m 2f' to furlongs."""
+    total = 0.0
+    m = re.search(r"(\d+)\s*m", dist_str, re.I)
+    if m:
+        total += int(m.group(1)) * 8
+    f = re.search(r"(\d+)\s*f", dist_str, re.I)
+    if f:
+        total += int(f.group(1))
+    y = re.search(r"(\d+)\s*y", dist_str, re.I)
+    if y:
+        total += int(y.group(1)) / 220.0
+    return round(total, 2) if total > 0 else None
+
+
+# Recognise previous-run discipline labels
+_DISCIPLINE_RE = re.compile(
+    r"\b(chase|hurdle|flat|bumper|nh\s+flat|hunter\s+chase)\b", re.I
+)
+
+# Recognise going labels within a previous-run line segment
+_GOING_WORDS = re.compile(
+    r"\b(heavy|soft|good\s+to\s+soft|good\s+to\s+firm|good|firm|"
+    r"standard|yielding|soft\s+to\s+heavy|yielding\s+to\s+soft)\b", re.I
+)
+
+
+def _parse_prev_run_line(line: str) -> Optional[dict]:
+    """Try to parse a previous run line such as:
+        'Jan 9 26 — Naas — 2m 4f 29y — Soft — 7/7 — Chase'
+
+    Identifies each segment by content rather than position so it is
+    robust to different separator styles (em-dash, en-dash, plain dash).
+    Returns a dict with going, distance_f, pos, field_size, discipline,
+    or None if the line does not look like a previous run record.
+    """
+    # Must start with a date-like token
+    if not re.match(r"\w{3}\s+\d{1,2}\s+\d{2,4}", line.strip(), re.I):
+        return None
+
+    # Split on em-dash / en-dash / spaced hyphen
+    parts = re.split(r"\s*[—–]\s*|\s+-\s+", line)
+    if len(parts) < 4:
+        return None
+
+    result: dict = {}
+    for part in parts:
+        part = part.strip()
+        if not part:
+            continue
+
+        # pos/field_size  e.g. "7/7"  "6/13"
+        pm = re.match(r"^(\d+)/(\d+)$", part)
+        if pm:
+            result["pos"]        = int(pm.group(1))
+            result["field_size"] = int(pm.group(2))
+            continue
+
+        # distance  e.g. "2m 4f 29y"  "1m 2f"
+        d = _prev_dist_to_furlongs(part)
+        if d and d > 0:
+            result["distance_f"] = d
+            continue
+
+        # discipline
+        dm = _DISCIPLINE_RE.search(part)
+        if dm:
+            result["discipline"] = dm.group(1).lower().replace(" ", "_")
+            continue
+
+        # going (checked after discipline to avoid 'good to firm' confusion)
+        gm = _GOING_WORDS.search(part)
+        if gm:
+            result["going"] = gm.group(1).lower()
+            continue
+
+    if "pos" in result and "field_size" in result:
+        return result
+    return None
 
 
 def parse_racecard_text(text: str) -> list:
@@ -175,14 +265,34 @@ def parse_racecard_text(text: str) -> list:
     (e.g. "Horse A Age: 4 Weight: 9-4 Trainer: Smith Jockey: Doyle")
     and multi-line formats.
 
+    Also extracts Comment:, Equipment:, and "Previous runs:" sections
+    when present, attaching them to the most recent runner.
+
     Safe defaults are applied for any missing optional fields.
     Returns only entries that have a name AND at least one data field.
     """
     lines = [l.strip() for l in text.split("\n") if l.strip()]
     runners = []
-    current = {}
+    current: dict = {}
+    in_prev_runs = False
 
     for line in lines:
+        # ── Previous runs section header ─────────────────────────────────────
+        if re.match(r"previous\s+runs?\s*:?", line, re.I):
+            in_prev_runs = True
+            current.setdefault("previous_runs", [])
+            continue
+
+        # ── Previous run record ──────────────────────────────────────────────
+        if in_prev_runs and current:
+            pr = _parse_prev_run_line(line)
+            if pr is not None:
+                current["previous_runs"].append(pr)
+                continue
+            else:
+                in_prev_runs = False   # non-matching line exits the section
+
+        # ── Normal field parsing ─────────────────────────────────────────────
         first_field = FIELD_KEYS.search(line)
 
         if first_field and first_field.start() > 0:
@@ -192,10 +302,11 @@ def parse_racecard_text(text: str) -> list:
                 if current and "name" in current:
                     runners.append(current)
                 current = {"name": name_part}
+                in_prev_runs = False
             _extract_fields(current, line[first_field.start():])
 
         elif first_field and first_field.start() == 0:
-            # Line starts with a field key (e.g. "Age: 4")
+            # Line starts with a field key (e.g. "Age: 4" or "Comment: ...")
             _extract_fields(current, line)
 
         else:
@@ -203,6 +314,7 @@ def parse_racecard_text(text: str) -> list:
             if current and "name" in current:
                 runners.append(current)
             current = {"name": line}
+            in_prev_runs = False
 
     # Finalise the last runner
     if current and "name" in current:
@@ -217,12 +329,15 @@ def parse_racecard_text(text: str) -> list:
         if not has_data:
             continue
         cleaned.append({
-            "name":    r["name"],
-            "age":     r.get("age", 4),
-            "weight":  r.get("weight", "9-4"),
-            "form":    r.get("form", ""),
-            "trainer": r.get("trainer", ""),
-            "jockey":  r.get("jockey", ""),
+            "name":          r["name"],
+            "age":           r.get("age", 4),
+            "weight":        r.get("weight", "9-4"),
+            "form":          r.get("form", ""),
+            "trainer":       r.get("trainer", ""),
+            "jockey":        r.get("jockey", ""),
+            "comment":       r.get("comment", ""),
+            "equipment":     r.get("equipment", ""),
+            "previous_runs": r.get("previous_runs") or None,
         })
 
     return cleaned
@@ -259,6 +374,9 @@ def analyze(request: AnalyzeRequest):
                 jockey=r.jockey,
                 draw=r.draw,
                 jockey_claim_lbs=r.jockey_claim_lbs or 0,
+                comment=r.comment or "",
+                equipment=r.equipment or "",
+                previous_runs=r.previous_runs,
             )
         )
 
@@ -377,6 +495,9 @@ def analyze_text(request: AnalyzeTextRequest):
             form=r["form"],
             trainer=r["trainer"],
             jockey=r["jockey"],
+            comment=r.get("comment", ""),
+            equipment=r.get("equipment", ""),
+            previous_runs=r.get("previous_runs"),
         )
         for r in runners
     ]

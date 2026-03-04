@@ -64,6 +64,35 @@ FALLBACK_RACES = 50
 
 # ── Helpers ────────────────────────────────────────────────────────────────
 
+# Plausible fractional odds pools by role
+_FAVOURITE_ODDS   = ["2/1", "5/2", "3/1", "7/2", "4/1"]
+_MID_ODDS         = ["5/1", "6/1", "7/1", "8/1", "10/1", "12/1"]
+_OUTSIDER_ODDS    = ["14/1", "16/1", "20/1", "25/1", "33/1"]
+_EXTREME_ODDS     = ["40/1", "50/1", "66/1", "80/1", "100/1"]
+
+
+def _synthetic_odds(runners: list[Runner],
+                    favourite_name: str,
+                    outsider_name: str | None = None) -> dict[str, str]:
+    """Build a plausible odds dict for a synthetic race.
+
+    * favourite_name gets a short price
+    * outsider_name (if given) gets an extreme price
+    * remaining runners get mid-range or outsider prices
+    """
+    result: dict[str, str] = {}
+    for r in runners:
+        if r.name == favourite_name:
+            result[r.name] = random.choice(_FAVOURITE_ODDS)
+        elif outsider_name and r.name == outsider_name:
+            result[r.name] = random.choice(_EXTREME_ODDS)
+        else:
+            # 60% mid, 40% outsider for the rest of the field
+            pool = _MID_ODDS if random.random() < 0.6 else _OUTSIDER_ODDS
+            result[r.name] = random.choice(pool)
+    return result
+
+
 def _random_weight_lbs() -> int:
     """Return a plausible race weight in lbs (9st–11st 10lb = 126–164 lbs)."""
     return random.randint(126, 164)
@@ -133,7 +162,9 @@ def run_simulation() -> None:
             runners=len(field),
         )
 
-        result = engine.analyze(race, field)
+        # Generate synthetic odds with the strong horse as market favourite
+        race_odds = _synthetic_odds(field, strong_name)
+        result = engine.analyze(race, field, odds=race_odds)
 
         race_conf = result.get("race_confidence", "LOW")
         confidence_dist[race_conf] = confidence_dist.get(race_conf, 0) + 1
@@ -325,6 +356,187 @@ def test_fallback_logic() -> None:
     print("=" * 60)
 
 
+def test_racecard_signals() -> None:
+    """Verify that racecard intelligence signals produce meaningful score differences.
+
+    Two near-identical runners compete in 50 races:
+      * enriched  — carries rich racecard data: good previous_runs (similar
+                    distance/going, high field-adjusted form), positive comment,
+                    and first-time equipment signal
+      * plain     — identical trainer/jockey/form/weight, no racecard extras
+
+    The enriched runner should outrank the plain one in the majority of races,
+    demonstrating that racecard signals provide a useful secondary boost without
+    dominating the model.
+    """
+    RACECARD_RACES = 50
+    enriched_beat_plain = 0
+    enriched_scores: list[float] = []
+    plain_scores:    list[float] = []
+
+    # Rich previous_runs: ran at 8f on good ground, consistently in top 30%
+    rich_prev_runs = [
+        {"going": "good", "distance_f": 8.0, "pos": 1, "field_size": 10, "discipline": "flat"},
+        {"going": "good", "distance_f": 8.5, "pos": 2, "field_size": 12, "discipline": "flat"},
+        {"going": "good", "distance_f": 7.0, "pos": 1, "field_size":  8, "discipline": "flat"},
+        {"going": "good", "distance_f": 8.0, "pos": 3, "field_size": 11, "discipline": "flat"},
+    ]
+
+    # Shared trainer/jockey so connections are identical between the two runners
+    shared_trainer = "William Haggas"
+    shared_jockey  = "Oisin Murphy"
+    shared_form    = "1213"
+    shared_weight  = 133
+
+    for race_idx in range(RACECARD_RACES):
+        n_normal = random.randint(6, 10)
+        enriched_name = f"Enriched {race_idx}"
+        plain_name    = f"Plain {race_idx}"
+
+        enriched = Runner(
+            name=enriched_name,
+            age=5,
+            weight_lbs=shared_weight,
+            form=shared_form,
+            trainer=shared_trainer,
+            jockey=shared_jockey,
+            draw=None,
+            jockey_claim_lbs=0,
+            comment="Progressive type who keeps the faith with connections; lightly raced.",
+            equipment="cheekpieces first time",
+            previous_runs=rich_prev_runs,
+        )
+
+        plain = Runner(
+            name=plain_name,
+            age=5,
+            weight_lbs=shared_weight,
+            form=shared_form,
+            trainer=shared_trainer,
+            jockey=shared_jockey,
+            draw=None,
+            jockey_claim_lbs=0,
+            # No comment, equipment, or previous_runs
+        )
+
+        field = [_make_runner(f"Normal {race_idx}_{j}") for j in range(n_normal)]
+        field.append(enriched)
+        field.append(plain)
+        random.shuffle(field)
+
+        race = RaceInfo(
+            course=random.choice(COURSES),
+            country="UK",
+            race_type="flat",
+            surface="turf",
+            distance_f=8,
+            going="good",
+            runners=len(field),
+        )
+
+        result    = engine.analyze(race, field)
+        rankings  = result.get("full_rankings", [])
+        score_map = {e["name"]: e["score"] for e in rankings}
+
+        es = score_map.get(enriched_name, 0.0)
+        ps = score_map.get(plain_name,    0.0)
+        enriched_scores.append(es)
+        plain_scores.append(ps)
+
+        if es > ps:
+            enriched_beat_plain += 1
+
+    beat_pct = round(enriched_beat_plain / RACECARD_RACES * 100, 1)
+    avg_e    = round(sum(enriched_scores) / len(enriched_scores), 4)
+    avg_p    = round(sum(plain_scores)    / len(plain_scores),    4)
+
+    print()
+    print("=" * 60)
+    print("Racecard Signals Test — enriched vs plain runner")
+    print("=" * 60)
+    print(f"Races simulated             : {RACECARD_RACES}")
+    print(f"Enriched runner avg score   : {avg_e}")
+    print(f"Plain runner avg score      : {avg_p}")
+    print(f"Score gap (enriched - plain): {round(avg_e - avg_p, 4)}")
+    print(f"Enriched outranked plain in : "
+          f"{enriched_beat_plain}/{RACECARD_RACES} races ({beat_pct}%)")
+    print("=" * 60)
+
+    assert beat_pct >= 70, (
+        f"FAIL: enriched runner only beat plain in {beat_pct}% of races "
+        f"(expected ≥70%) — racecard signals may not be registering"
+    )
+    print(f"PASS: enriched beat plain {beat_pct}%  (threshold ≥70%)")
+    print("=" * 60)
+
+
+def test_outsider_suppression() -> None:
+    """Verify that extreme outsiders (40/1+) are almost never selected as top pick.
+
+    Each race contains one runner deliberately assigned extreme odds (40–100/1)
+    but with average form and connections (no other handicaps).  The model
+    should rarely promote this horse to the top pick despite normal scoring.
+    """
+    OUTSIDER_RACES  = 50
+    outsider_top1   = 0
+    outsider_top3   = 0
+
+    for race_idx in range(OUTSIDER_RACES):
+        n_runners     = random.randint(8, 12)
+        outsider_name = f"Outsider {race_idx}"
+
+        # Build field — outsider has normal average form, not deliberately weak
+        field = [_make_runner(f"Normal {race_idx}_{j}") for j in range(n_runners - 1)]
+        outsider = _make_runner(outsider_name, quality="normal")
+        field.insert(random.randint(0, len(field)), outsider)
+
+        # Choose a random favourite (not the outsider)
+        others      = [r for r in field if r.name != outsider_name]
+        fav_runner  = random.choice(others)
+
+        race = RaceInfo(
+            course=random.choice(COURSES),
+            country="UK",
+            race_type="flat",
+            surface="turf",
+            distance_f=8.0,
+            going="good",
+            runners=len(field),
+        )
+
+        race_odds = _synthetic_odds(field, fav_runner.name, outsider_name=outsider_name)
+        result    = engine.analyze(race, field, odds=race_odds)
+
+        rankings     = result.get("full_rankings", [])
+        ranked_names = [e["name"] for e in rankings]
+
+        if ranked_names and ranked_names[0] == outsider_name:
+            outsider_top1 += 1
+        if outsider_name in ranked_names[:3]:
+            outsider_top3 += 1
+
+    top1_pct = round(outsider_top1 / OUTSIDER_RACES * 100, 1)
+    top3_pct = round(outsider_top3 / OUTSIDER_RACES * 100, 1)
+
+    print()
+    print("=" * 60)
+    print("Outsider Suppression Test — extreme odds (40/1+)")
+    print("=" * 60)
+    print(f"Races simulated              : {OUTSIDER_RACES}")
+    print(f"Outsider selected as Top 1   : {outsider_top1} races  ({top1_pct}%)")
+    print(f"Outsider in Top 3            : {outsider_top3} races  ({top3_pct}%)")
+    print("=" * 60)
+
+    assert top1_pct <= 10, (
+        f"FAIL: extreme outsider was top pick in {top1_pct}% of races "
+        f"(expected ≤10%) — odds suppression may not be working"
+    )
+    print(f"PASS: outsider top-1 rate = {top1_pct}%  (threshold ≤10%)")
+    print("=" * 60)
+
+
 if __name__ == "__main__":
     run_simulation()
     test_fallback_logic()
+    test_racecard_signals()
+    test_outsider_suppression()
