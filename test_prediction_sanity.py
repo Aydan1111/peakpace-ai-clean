@@ -23,7 +23,7 @@ import os
 # Ensure the project root is on the path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from racing_ai_core import RacingAICore, RaceInfo, Runner  # noqa: E402
+from racing_ai_core import RacingAICore, RaceInfo, Runner, _parse_odds  # noqa: E402
 
 # ── Constants ──────────────────────────────────────────────────────────────
 
@@ -535,8 +535,225 @@ def test_outsider_suppression() -> None:
     print("=" * 60)
 
 
+def test_dark_horse_selection() -> None:
+    """Verify dark horse selection rules.
+
+    Suite A — 50 races with a qualifying dark horse candidate (odds 6/1–33/1):
+      * Dark horse is never rank 1 or 2.
+      * Dark horse odds fall within 6/1–33/1 (decimal 7.0–34.0).
+      * Dark horse score >= 0.85 × gold_score.
+      * Total picks (gold + silver + dark horse) never exceed 3.
+
+    Suite B — 20 races where every non-gold/silver runner gets extreme odds
+    (40/1+): the dark horse should be None (no qualifying candidate).
+
+    Suite C — Default engine (dark_horse_enabled=False) returns no dark horse
+    regardless of odds.
+    """
+    DH_RACES   = 50
+    _DH_ODDS   = ["6/1", "8/1", "10/1", "12/1", "14/1", "16/1", "20/1", "25/1", "33/1"]
+    _DH_MIN    = 7.0   # decimal for 6/1
+    _DH_MAX    = 34.0  # decimal for 33/1
+
+    # ── Engine with dark horse enabled ──────────────────────────────────────
+    dh_engine = RacingAICore()
+    dh_engine.dark_horse_enabled = True
+
+    violations:  list[str] = []
+    dark_found   = 0
+    no_dh_races  = 0
+
+    # ── Suite A: qualified dark horse should appear when conditions are met ──
+    for race_idx in range(DH_RACES):
+        n_runners    = random.randint(8, 12)
+        gold_name    = f"DH_Gold {race_idx}"
+        silver_name  = f"DH_Silver {race_idx}"
+        dh_cand_name = f"DH_Cand {race_idx}"
+
+        gold_r   = _make_runner(gold_name,    quality="strong")
+        silver_r = _make_runner(silver_name,  quality="strong")
+        dh_r     = _make_runner(dh_cand_name, quality="normal")
+        others   = [_make_runner(f"DH_Filler {race_idx}_{j}")
+                    for j in range(n_runners - 3)]
+
+        field = [gold_r, silver_r, dh_r] + others
+        random.shuffle(field)
+
+        race = RaceInfo(
+            course=random.choice(COURSES),
+            country="UK",
+            race_type="flat",
+            surface="turf",
+            distance_f=8.0,
+            going="good",
+            runners=len(field),
+        )
+
+        odds: dict[str, str] = {}
+        for r in field:
+            if r.name == gold_name:
+                odds[r.name] = random.choice(["2/1", "5/2", "3/1"])
+            elif r.name == silver_name:
+                odds[r.name] = random.choice(["4/1", "9/2", "5/1"])
+            elif r.name == dh_cand_name:
+                odds[r.name] = random.choice(_DH_ODDS)
+            else:
+                odds[r.name] = random.choice(_OUTSIDER_ODDS)
+
+        result    = dh_engine.analyze(race, field, odds=odds)
+        rankings  = result.get("full_rankings", [])
+        gold_pick = result.get("gold_pick")
+        dark_pick = result.get("dark_horse")
+
+        # Total picks must never exceed 3
+        all_picks = [p for p in (
+            gold_pick,
+            result.get("silver_pick"),
+            dark_pick,
+        ) if p is not None]
+        if len(all_picks) > 3:
+            violations.append(
+                f"Race {race_idx}: {len(all_picks)} picks returned (max 3)")
+
+        if dark_pick is None:
+            no_dh_races += 1
+            continue
+
+        dark_found += 1
+        ranked_names = [e["name"] for e in rankings]
+        dh_rank = (ranked_names.index(dark_pick["name"]) + 1
+                   if dark_pick["name"] in ranked_names else 999)
+
+        # Rule: dark horse must not be rank 1 or 2
+        if dh_rank <= 2:
+            violations.append(
+                f"Race {race_idx}: dark horse '{dark_pick['name']}' is rank {dh_rank}")
+
+        # Rule: dark horse must be within ranks 3–6
+        if dh_rank > 6:
+            violations.append(
+                f"Race {race_idx}: dark horse '{dark_pick['name']}' is rank {dh_rank} (>6)")
+
+        # Rule: odds within 6/1–33/1
+        raw_dh_odds = odds.get(dark_pick["name"])
+        if raw_dh_odds:
+            dec = _parse_odds(raw_dh_odds)
+            if dec is not None and not (_DH_MIN <= dec <= _DH_MAX):
+                violations.append(
+                    f"Race {race_idx}: dark horse odds '{raw_dh_odds}' "
+                    f"(dec={dec:.2f}) outside 6/1–33/1")
+
+        # Rule: score >= 0.85 × gold_score
+        if gold_pick:
+            floor = 0.85 * gold_pick["score"]
+            if dark_pick["score"] < floor:
+                violations.append(
+                    f"Race {race_idx}: dark horse score {dark_pick['score']:.4f} "
+                    f"< 0.85 × gold {gold_pick['score']:.4f} = {floor:.4f}")
+
+    # ── Suite B: extreme odds → no qualifying dark horse ────────────────────
+    NQ_RACES     = 20
+    no_qual_none = 0
+    for race_idx in range(NQ_RACES):
+        gname    = f"NQ_Gold {race_idx}"
+        sname    = f"NQ_Silver {race_idx}"
+        gold_r   = _make_runner(gname,  quality="strong")
+        silver_r = _make_runner(sname,  quality="strong")
+        others   = [_make_runner(f"NQ_Other {race_idx}_{j}") for j in range(6)]
+        field    = [gold_r, silver_r] + others
+        random.shuffle(field)
+
+        race = RaceInfo(
+            course=random.choice(COURSES),
+            country="UK",
+            race_type="flat",
+            surface="turf",
+            distance_f=8.0,
+            going="good",
+            runners=len(field),
+        )
+
+        nq_odds: dict[str, str] = {}
+        for r in field:
+            if r.name == gname:
+                nq_odds[r.name] = "2/1"
+            elif r.name == sname:
+                nq_odds[r.name] = "4/1"
+            else:
+                nq_odds[r.name] = random.choice(_EXTREME_ODDS)  # 40/1+
+
+        result = dh_engine.analyze(race, field, odds=nq_odds)
+        if result.get("dark_horse") is None:
+            no_qual_none += 1
+
+    no_qual_pct = round(no_qual_none / NQ_RACES * 100, 1)
+
+    # ── Suite C: default engine (disabled) returns no dark horse ────────────
+    default_engine = RacingAICore()  # dark_horse_enabled = False by default
+    default_dh_found = 0
+    for race_idx in range(20):
+        n_runners = random.randint(6, 10)
+        field = [_make_runner(f"Def {race_idx}_{j}") for j in range(n_runners)]
+        race  = RaceInfo(
+            course=random.choice(COURSES),
+            country="UK",
+            race_type="flat",
+            surface="turf",
+            distance_f=8.0,
+            going="good",
+            runners=len(field),
+        )
+        # Provide odds so the engine has something to work with
+        fav = field[0]
+        def_odds = _synthetic_odds(field, fav.name)
+        result   = default_engine.analyze(race, field, odds=def_odds)
+        if result.get("dark_horse") is not None:
+            default_dh_found += 1
+
+    # ── Print summary ────────────────────────────────────────────────────────
+    print()
+    print("=" * 60)
+    print("Dark Horse Selection Test")
+    print("=" * 60)
+    print(f"Suite A — {DH_RACES} races with qualified candidates:")
+    print(f"  Dark horse found        : {dark_found}")
+    print(f"  No qualifying candidate : {no_dh_races}")
+    print(f"  Rule violations         : {len(violations)}")
+    if violations:
+        print("  First violations:")
+        for v in violations[:5]:
+            print(f"    VIOLATION: {v}")
+    print()
+    print(f"Suite B — extreme odds races (DH should be None):")
+    print(f"  Returned None : {no_qual_none}/{NQ_RACES} ({no_qual_pct}%)")
+    print()
+    print(f"Suite C — default engine (dark_horse_enabled=False):")
+    print(f"  Dark horse returned (should be 0): {default_dh_found}/20")
+    print("=" * 60)
+
+    assert len(violations) == 0, (
+        f"FAIL: {len(violations)} dark horse rule violation(s) — "
+        f"see output above"
+    )
+    print("PASS: all dark horse rule checks passed")
+
+    assert no_qual_pct >= 80, (
+        f"FAIL: only {no_qual_pct}% of extreme-odds races returned no dark horse "
+        f"(expected ≥80%)"
+    )
+    print(f"PASS: no-qualifier scenario {no_qual_pct}% returned None  (threshold ≥80%)")
+
+    assert default_dh_found == 0, (
+        f"FAIL: default engine returned {default_dh_found} dark horse(s) "
+        f"when dark_horse_enabled=False"
+    )
+    print("PASS: default engine (disabled) returned no dark horse")
+    print("=" * 60)
+
+
 if __name__ == "__main__":
     run_simulation()
     test_fallback_logic()
     test_racecard_signals()
     test_outsider_suppression()
+    test_dark_horse_selection()
