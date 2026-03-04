@@ -1,12 +1,16 @@
 """
 test_prediction_sanity.py
 ─────────────────────────
-Simulates 100 synthetic races to sanity-check the prediction engine.
+Two test suites for the prediction engine:
 
-Each race includes one deliberately "strong" horse (good form, high rating,
-reasonable weight).  The script records how often the model picks that horse
-in the top 1 and top 3 positions, and reports the overall confidence
-distribution.
+1. run_simulation()   — 100 synthetic races each with a "strong" horse
+   (good form + reasonable weight).  Checks it ranks top 3 ≥60% of the time.
+
+2. test_fallback_logic() — 50 races where two low-data horses compete:
+   * "strong_unknown": no historical horse data, but a top-tier trainer/jockey
+   * "poor_unknown":   no historical horse data AND unknown trainer/jockey
+   Checks that strong_unknown outranks poor_unknown in ≥65% of races,
+   verifying the coverage-based connections fallback is working.
 
 Run with:
     python test_prediction_sanity.py
@@ -45,6 +49,18 @@ JOCKEYS = [
     "Robert Havlin", "Andrea Atzeni", "Kieran Shoemark",
     "Adam Kirby", "Hollie Doyle", "David Egan",
 ]
+
+# ── Fallback test constants ─────────────────────────────────────────────────
+
+# Names in the UK fallback dictionaries (guaranteed recognised by the engine)
+STRONG_TRAINER = "Nicky Henderson"   # 1.07 in _UK_TRAINER_FALLBACK
+STRONG_JOCKEY  = "Ryan Moore"        # 1.08 in _UK_JOCKEY_FALLBACK
+
+# Names that will NOT appear in any stats file → conf_deduction += 3 each
+UNKNOWN_TRAINER = "Unknown Trainer XYZ"
+UNKNOWN_JOCKEY  = "Unknown Jockey XYZ"
+
+FALLBACK_RACES = 50
 
 # ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -208,5 +224,107 @@ def run_simulation() -> None:
     print("=" * 60)
 
 
+def test_fallback_logic() -> None:
+    """Verify the coverage-based connections fallback works as intended.
+
+    Each race contains:
+      * strong_unknown — no horse history, no form, but top-tier trainer/jockey
+      * poor_unknown   — no horse history, no form, completely unknown connections
+      * 6–10 normal runners
+
+    The strong_unknown should consistently outrank the poor_unknown because the
+    fallback amplifies trainer/jockey signal when horse data is absent.
+    """
+    strong_beat_poor = 0
+    strong_scores: list[float] = []
+    poor_scores:   list[float] = []
+
+    for race_idx in range(FALLBACK_RACES):
+        n_normal   = random.randint(6, 10)
+        su_name    = f"StrongUnknown {race_idx}"
+        pu_name    = f"PoorUnknown {race_idx}"
+
+        # Strong unknown: recognised top trainer/jockey, no horse record, no form
+        strong_unknown = Runner(
+            name=su_name,
+            age=random.randint(3, 7),
+            weight_lbs=random.randint(126, 142),
+            form="",                    # deliberately empty — no history
+            trainer=STRONG_TRAINER,
+            jockey=STRONG_JOCKEY,
+            draw=None,
+            jockey_claim_lbs=0,
+        )
+
+        # Poor unknown: unknown trainer/jockey, no horse record, no form
+        poor_unknown = Runner(
+            name=pu_name,
+            age=random.randint(3, 7),
+            weight_lbs=random.randint(126, 142),
+            form="",                    # deliberately empty — no history
+            trainer=UNKNOWN_TRAINER,
+            jockey=UNKNOWN_JOCKEY,
+            draw=None,
+            jockey_claim_lbs=0,
+        )
+
+        # Fill the rest of the field with normal runners
+        field = [_make_runner(f"Normal {race_idx}_{j}") for j in range(n_normal)]
+        field.append(strong_unknown)
+        field.append(poor_unknown)
+        random.shuffle(field)
+
+        race = RaceInfo(
+            course=random.choice(COURSES),
+            country="UK",
+            race_type="flat",
+            surface="turf",
+            distance_f=8.0,
+            going="good",
+            runners=len(field),
+        )
+
+        result  = engine.analyze(race, field)
+        rankings = result.get("full_rankings", [])
+        scored_map = {e["name"]: e["score"] for e in rankings}
+
+        su_score = scored_map.get(su_name, 0.0)
+        pu_score = scored_map.get(pu_name, 0.0)
+        strong_scores.append(su_score)
+        poor_scores.append(pu_score)
+
+        if su_score > pu_score:
+            strong_beat_poor += 1
+
+    beat_pct = round(strong_beat_poor / FALLBACK_RACES * 100, 1)
+    avg_su   = round(sum(strong_scores) / len(strong_scores), 4)
+    avg_pu   = round(sum(poor_scores)   / len(poor_scores),   4)
+
+    print()
+    print("=" * 60)
+    print("Fallback Logic Test — Unknown horses with/without connections")
+    print("=" * 60)
+    print(f"Races simulated         : {FALLBACK_RACES}")
+    print(f"Strong unknown trainer  : {STRONG_TRAINER}")
+    print(f"Strong unknown jockey   : {STRONG_JOCKEY}")
+    print(f"Poor unknown trainer    : {UNKNOWN_TRAINER}")
+    print(f"Poor unknown jockey     : {UNKNOWN_JOCKEY}")
+    print()
+    print(f"Strong unknown avg score : {avg_su}")
+    print(f"Poor   unknown avg score : {avg_pu}")
+    print(f"Score gap (su - pu)      : {round(avg_su - avg_pu, 4)}")
+    print(f"Strong unknown outranked poor unknown in: "
+          f"{strong_beat_poor}/{FALLBACK_RACES} races ({beat_pct}%)")
+    print("=" * 60)
+
+    assert beat_pct >= 65, (
+        f"FAIL: strong_unknown only beat poor_unknown in {beat_pct}% of races "
+        f"(expected ≥65%) — fallback logic may not be working"
+    )
+    print(f"PASS: strong_unknown beat poor_unknown {beat_pct}%  (threshold ≥65%)")
+    print("=" * 60)
+
+
 if __name__ == "__main__":
     run_simulation()
+    test_fallback_logic()

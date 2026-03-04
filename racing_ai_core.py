@@ -970,6 +970,34 @@ class RacingAICore:
             if conf_deduction > 0:
                 final_score *= max(0.88, 1.0 - conf_deduction * 0.015)
 
+            # ── Smart fallback for low-data runners ──────────────────────────
+            # Compute a data-coverage score (0.0 = nothing known, 1.0 = full).
+            # We derive it from multipliers already calculated so there are no
+            # extra lookups.  Signals and their weights:
+            #   form digits (2+)   → 0.25
+            #   official rating    → 0.35   (rating > 1.0 means it was found)
+            #   win-rate stats     → 0.25   (perf   > 1.0 means it was found)
+            #   trainer in data    → 0.075  (multiplier ≠ 1.0)
+            #   jockey in data     → 0.075  (multiplier ≠ 1.0)
+            _form_cov   = min(1.0, len(_form_digits) / 2) * 0.25
+            _rating_cov = 0.35  if rating  > 1.005 else 0.0
+            _perf_cov   = 0.25  if perf    > 1.005 else 0.0
+            _train_cov  = 0.075 if abs(trainer - 1.0) > 0.005 else 0.0
+            _jock_cov   = 0.075 if abs(jockey  - 1.0) > 0.005 else 0.0
+            coverage    = (_form_cov + _rating_cov + _perf_cov
+                           + _train_cov + _jock_cov)
+
+            if coverage < 0.5:
+                # How deep into the "unknown" zone (0.0 at cov=0.5, 1.0 at 0)
+                fallback_strength = 1.0 - (coverage / 0.5)
+                connections_mult  = trainer * jockey * combo
+                # Apply the connections multiplier a second time (fractionally).
+                # Strong connections (>1.0) get a bonus; weak ones (<1.0) get
+                # a further penalty.  Neutral (=1.0) is unaffected.
+                # Max additional effect ≈ ±8% for a 10% connection edge.
+                extra = connections_mult ** (fallback_strength * 0.8)
+                final_score *= extra
+
             going_pen = self._going_penalty(r, race.going, race.race_type,
                                             race.country)
             # Score reduction for testing ground: 1% per penalty point,
@@ -999,6 +1027,7 @@ class RacingAICore:
                 "_conf_ded":   conf_deduction,
                 "_going_pen":  going_pen,
                 "_raw_rating": raw_rating,   # raw int or None
+                "_coverage":   round(coverage, 3),
             })
 
         scored.sort(key=lambda x: x["score"], reverse=True)
@@ -1125,7 +1154,7 @@ class RacingAICore:
         # Strip all temporary writeup-helper fields from every entry.
         _temp = ("_rating_b", "_perf_b", "_trainer_b", "_jockey_b",
                  "_combo_b", "_conf_ded", "_going_pen",
-                 "_raw_rating", "_rating_edge")
+                 "_raw_rating", "_rating_edge", "_coverage")
         for i, entry in enumerate(scored):
             for f in _temp:
                 entry.pop(f, None)
