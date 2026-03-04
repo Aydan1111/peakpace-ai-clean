@@ -92,6 +92,7 @@ class AnalyzeRequest(BaseModel):
     going: str
     runners: List[RunnerInput]
     odds: Optional[Dict[str, str]] = None
+    dark_horse_enabled: bool = False
 
 
 class TextRaceInput(BaseModel):
@@ -107,6 +108,7 @@ class AnalyzeTextRequest(BaseModel):
     race_info: TextRaceInput
     racecard_text: str
     odds: Optional[Dict[str, str]] = None
+    dark_horse_enabled: bool = False
 
 
 class RaceQualityRequest(BaseModel):
@@ -380,6 +382,7 @@ def analyze(request: AnalyzeRequest):
             )
         )
 
+    engine.dark_horse_enabled = request.dark_horse_enabled
     return engine.analyze(race, runner_objects, odds=request.odds)
 
 
@@ -502,6 +505,7 @@ def analyze_text(request: AnalyzeTextRequest):
         for r in runners
     ]
 
+    engine.dark_horse_enabled = request.dark_horse_enabled
     return engine.analyze(race, runner_objects, odds=request.odds)
 
 

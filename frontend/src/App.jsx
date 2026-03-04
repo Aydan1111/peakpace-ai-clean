@@ -111,6 +111,9 @@ export default function App() {
   // Odds — keyed by runner name, values are strings ("9/1", "evs", etc.)
   const [odds, setOdds] = useState({});
 
+  // Dark horse toggle — off by default; Gold + Silver only when false
+  const [darkHorseEnabled, setDarkHorseEnabled] = useState(false);
+
   // Reset odds when the racecard changes
   const handlePasteChange = (val) => {
     setPasteText(val);
@@ -169,6 +172,7 @@ export default function App() {
           },
           racecard_text: pasteText,
           odds: oddsPayload,
+          dark_horse_enabled: darkHorseEnabled,
         };
       } else {
         // /analyze expects flat AnalyzeRequest
@@ -191,6 +195,7 @@ export default function App() {
             jockey_claim_lbs: 0,
           })),
           odds: oddsPayload,
+          dark_horse_enabled: darkHorseEnabled,
         };
       }
 
@@ -273,6 +278,33 @@ export default function App() {
               onChange={setOdds}
             />
           )}
+
+          {/* Dark Horse Toggle */}
+          <div className="flex justify-center">
+            <label className="flex items-center gap-3 cursor-pointer select-none group">
+              {/* Track */}
+              <span
+                onClick={() => setDarkHorseEnabled((v) => !v)}
+                className={`relative inline-flex h-6 w-11 shrink-0 rounded-full border-2 transition-colors duration-200 ${
+                  darkHorseEnabled
+                    ? "border-purple-500 bg-purple-500/30"
+                    : "border-border bg-surface-light"
+                }`}
+              >
+                {/* Thumb */}
+                <span
+                  className={`inline-block h-4 w-4 mt-0.5 rounded-full shadow transition-transform duration-200 ${
+                    darkHorseEnabled
+                      ? "translate-x-5 bg-purple-400"
+                      : "translate-x-0.5 bg-text-dim"
+                  }`}
+                />
+              </span>
+              <span className={`text-sm font-medium transition-colors ${darkHorseEnabled ? "text-purple-300" : "text-text-dim"}`}>
+                Enable Dark Horse Pick
+              </span>
+            </label>
+          </div>
 
           <div className="flex justify-center gap-3">
             <button
