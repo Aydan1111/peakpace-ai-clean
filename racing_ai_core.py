@@ -169,6 +169,22 @@ _NH_KEYWORDS = ("hurdle", "chase", "nh", "national hunt", "national_hunt",
 # Going conditions considered testing (used for going confidence penalty)
 _TESTING_GOING = frozenset({"heavy", "soft", "good to soft"})
 
+# Matches country suffixes appended to horse names on racecards, e.g. (IRE), (GB)
+_COUNTRY_SUFFIX_RE = re.compile(
+    r"\s*\((?:ire|gb|fr|usa|ger|nz|aus|can|spa|ity|por)\)\s*$",
+    re.IGNORECASE,
+)
+
+
+def _normalize_name(name: str) -> str:
+    """Normalize a horse name for dictionary lookups.
+
+    Strips country suffixes like (IRE), (GB), (FR) that appear on racecards
+    but are absent from the stats/ratings files, then lowercases and trims.
+    """
+    n = _COUNTRY_SUFFIX_RE.sub("", name).strip().lower()
+    return n
+
 
 def _is_nh(race_type: str) -> bool:
     """Return True when race_type indicates National Hunt / Jumps."""
@@ -436,7 +452,7 @@ class RacingAICore:
         NH ratings (140-164): max +8%.
         Uses only the dataset that matches the country + race type.
         """
-        name = horse_name.lower().strip()
+        name = _normalize_name(horse_name)
         uk = _is_uk(country)
 
         if uk:
@@ -464,7 +480,7 @@ class RacingAICore:
     def horse_performance_boost(self, horse_name: str, race_type: str = "",
                                 country: str = "") -> float:
         """Derive a multiplier from the horse's own win-rate in stats files."""
-        name = horse_name.lower().strip()
+        name = _normalize_name(horse_name)
         uk = _is_uk(country)
 
         if uk:
@@ -482,14 +498,16 @@ class RacingAICore:
     # FORM SCORE
     # --------------------------------------------------------
     def form_score(self, form: str) -> float:
-        digits = [int(c) for c in form if c.isdigit()]
+        # In racing form strings, 0 means finished 10th or worse (unplaced).
+        # Treat it as 10 so bad form doesn't score better than a 1st.
+        digits = [10 if c == "0" else int(c) for c in form if c.isdigit()]
         if not digits:
             return 0.5
 
         avg = statistics.mean(digits)
         score = max(0.3, 1.2 - (avg * 0.12))
 
-        # Improving trend bonus
+        # Improving trend bonus — only when last run is genuinely better
         if len(digits) >= 2 and digits[-1] < digits[-2]:
             score *= 1.05
 
@@ -500,7 +518,9 @@ class RacingAICore:
     # --------------------------------------------------------
     def weight_score(self, runner: Runner) -> float:
         net_weight = runner.weight_lbs - runner.jockey_claim_lbs
-        return max(0.75, 1.2 - ((net_weight - 126) * 0.01))
+        # Cap at 1.12 so a very light weight cannot inflate the score
+        # beyond a realistic +12% advantage.
+        return min(1.12, max(0.75, 1.2 - ((net_weight - 126) * 0.01)))
 
     # --------------------------------------------------------
     # AGE SCORE
@@ -568,7 +588,7 @@ class RacingAICore:
             deduction += 3
 
         # Horse check
-        name = horse_name.lower().strip()
+        name = _normalize_name(horse_name)
         if uk:
             rats = _UK_HORSE_RATINGS_NH if is_nh else _UK_HORSE_RATINGS_FLAT
             stats = _UK_HORSE_STATS_NH if is_nh else _UK_HORSE_STATS_FLAT
@@ -706,7 +726,7 @@ class RacingAICore:
             return 0
 
         penalty = 0
-        name = runner.name.lower().strip()
+        name = _normalize_name(runner.name)
         uk = _is_uk(country)
         is_nh_flag = _is_nh(race_type)
 
@@ -739,7 +759,7 @@ class RacingAICore:
         Reuses the same rating dicts as horse_rating_boost() — no new data.
         Used only for the field-average context layer; never alters scoring.
         """
-        name = horse_name.lower().strip()
+        name = _normalize_name(horse_name)
         uk = _is_uk(country)
         if uk:
             return (_UK_HORSE_RATINGS_NH if _is_nh(race_type)
@@ -1039,13 +1059,18 @@ class RacingAICore:
             else:
                 entry["_rating_edge"] = 0.0
 
-        # Race-level confidence based on spread between top two
+        # Race-level confidence based on percentage lead of top horse over second.
+        # Using a relative spread avoids penalising races where absolute scores
+        # are compressed (e.g. large, evenly-matched fields).
         race_confidence = "LOW"
         if len(scored) >= 2:
-            spread = scored[0]["score"] - scored[1]["score"]
-            if spread >= 0.06:
+            spread_pct = (
+                (scored[0]["score"] - scored[1]["score"]) / scored[1]["score"]
+                if scored[1]["score"] > 0 else 0.0
+            )
+            if spread_pct >= 0.04:      # top horse ≥4% clear → HIGH
                 race_confidence = "HIGH"
-            elif spread >= 0.02:
+            elif spread_pct >= 0.012:   # top horse ≥1.2% clear → MEDIUM
                 race_confidence = "MEDIUM"
         elif len(scored) == 1:
             race_confidence = "MEDIUM"
