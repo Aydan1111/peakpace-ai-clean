@@ -7,6 +7,7 @@ const EMPTY_RUNNER = {
   form: "",
   trainer: "",
   jockey: "",
+  odds: "",
   equipment: "",
   comment: "",
   previous_runs: [],
@@ -76,6 +77,7 @@ export default function RunnerTable({ runners, onChange }) {
               <th className="pb-2 pr-2">Form</th>
               <th className="pb-2 pr-2">Trainer</th>
               <th className="pb-2 pr-2">Jockey</th>
+              <th className="pb-2 pr-2">Odds</th>
               <th className="pb-2 pr-2">Equipment</th>
               <th className="pb-2 pr-2"></th>
               <th className="pb-2"></th>
@@ -140,6 +142,15 @@ export default function RunnerTable({ runners, onChange }) {
                       onChange={(e) => update(i, "jockey", e.target.value)}
                       placeholder="Jockey"
                       className="input-compact"
+                    />
+                  </td>
+                  <td className="py-2 pr-2">
+                    <input
+                      type="text"
+                      value={r.odds || ""}
+                      onChange={(e) => update(i, "odds", e.target.value)}
+                      placeholder="e.g. 9/1"
+                      className="input-compact w-20"
                     />
                   </td>
                   <td className="py-2 pr-2">
@@ -248,11 +259,17 @@ export default function RunnerTable({ runners, onChange }) {
                   onChange={(e) => update(i, "trainer", e.target.value)}
                   className="input" />
               </label>
-              <label className="col-span-2 flex flex-col gap-1">
+              <label className="flex flex-col gap-1">
                 <span className="text-xs text-text-dim">Jockey</span>
                 <input type="text" value={r.jockey}
                   onChange={(e) => update(i, "jockey", e.target.value)}
                   className="input" />
+              </label>
+              <label className="flex flex-col gap-1">
+                <span className="text-xs text-text-dim">Odds (optional)</span>
+                <input type="text" value={r.odds || ""}
+                  onChange={(e) => update(i, "odds", e.target.value)}
+                  placeholder="e.g. 9/1" className="input" />
               </label>
               <label className="col-span-2 flex flex-col gap-1">
                 <span className="text-xs text-text-dim">Equipment (optional)</span>

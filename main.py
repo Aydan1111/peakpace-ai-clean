@@ -131,7 +131,7 @@ class RaceQualityTextRequest(BaseModel):
 # -------------------------------------------------
 
 FIELD_KEYS = re.compile(
-    r"(Age|Weight|Trainer|Jockey|Form|F|Comment|Equipment)\s*:", re.I
+    r"(Age|Weight|Trainer|Jockey|Form|F|Odds|Comment|Equipment)\s*:", re.I
 )
 
 # Words that can appear directly before a field key but are NOT horse names.
@@ -178,6 +178,9 @@ def _extract_fields(current: dict, text: str):
         m = re.search(r"(?:^f|form)[:\s]+([0-9A-Za-z/\-]+)", token, re.I)
         if m:
             current["form"] = m.group(1)
+        m = re.search(r"odds[:\s]+([^\s]+)", token, re.I)
+        if m:
+            current["odds"] = m.group(1).strip()
         m = re.search(r"comment[:\s]+(.+)", token, re.I)
         if m:
             current["comment"] = m.group(1).strip().strip('"').strip("'")
@@ -380,6 +383,7 @@ def parse_racecard_text(text: str) -> list:
             "form":          r.get("form", ""),
             "trainer":       r.get("trainer", ""),
             "jockey":        r.get("jockey", ""),
+            "odds":          r.get("odds", ""),
             "comment":       r.get("comment", ""),
             "equipment":     r.get("equipment", ""),
             "previous_runs": r.get("previous_runs") or None,
@@ -548,8 +552,14 @@ def analyze_text(request: AnalyzeTextRequest):
         for r in runners
     ]
 
+    # Build odds dict from inline ODDS: fields in the pasted racecard.
+    # Request-level odds (if supplied) take precedence over inline ones.
+    inline_odds = {r["name"]: r["odds"] for r in runners if r.get("odds")}
+    merged_odds  = {**inline_odds, **(request.odds or {})}
+    final_odds   = merged_odds if merged_odds else None
+
     engine.dark_horse_enabled = request.dark_horse_enabled
-    return engine.analyze(race, runner_objects, odds=request.odds)
+    return engine.analyze(race, runner_objects, odds=final_odds)
 
 
 # -------------------------------------------------
