@@ -127,6 +127,195 @@ class RaceQualityTextRequest(BaseModel):
 
 
 # -------------------------------------------------
+# RACE HEADER PARSING — optional fields from the
+# section that precedes the first HORSE: block.
+# -------------------------------------------------
+
+# Known UK courses for unstructured course extraction.
+_UK_COURSES = frozenset({
+    "ascot", "cheltenham", "goodwood", "york", "newmarket", "epsom", "sandown",
+    "haydock", "newbury", "chester", "aintree", "doncaster", "leicester",
+    "kempton", "lingfield", "wolverhampton", "nottingham", "windsor",
+    "catterick", "pontefract", "carlisle", "musselburgh", "ayr", "perth",
+    "chelmsford", "yarmouth", "brighton", "salisbury", "bath", "chepstow",
+    "exeter", "taunton", "newton abbot", "hereford", "ludlow", "worcester",
+    "stratford", "huntingdon", "wetherby", "uttoxeter", "market rasen",
+    "fakenham", "cartmel", "towcester", "wincanton", "plumpton", "folkestone",
+    "newcastle", "redcar", "thirsk", "ripon", "beverley", "hamilton",
+    "musselburgh", "perth", "kelso", "hexham", "sedgefield", "bangor",
+})
+
+# Structured header line:  COURSE: Newcastle  /  DISTANCE: 6f  / …
+_HEADER_STRUCTURED_RE = re.compile(
+    r"^(COURSE|DISTANCE|RUNNERS?|CLASS|TYPE|RACE(?:[\s_]NAME)?|GOING)\s*:\s*(.+)",
+    re.I,
+)
+
+# Distance pattern used in the unstructured header (e.g. "6f", "2m4f", "1m 2f")
+_DIST_HEADER_RE = re.compile(r"\b(\d+m(?:\s*\d+f)?|\d+f)\b", re.I)
+
+# "8 Runners" / "12 runner"
+_RUNNERS_HEADER_RE = re.compile(r"\b(\d+)\s+[Rr]unners?\b")
+
+# "Class 6" / "Class A"
+_CLASS_HEADER_RE = re.compile(r"\bClass\s+([1-9A-F])\b", re.I)
+
+# Meeting-type keywords (what kind of race, not Flat vs Jumps)
+_MEETING_TYPE_RE = re.compile(
+    r"\b(Handicap|Hcap|Maiden|Novice|Stakes|Conditions|Listed|"
+    r"Group\s+\d|Grade\s+\d|Claimer|Claiming|Selling|Seller|"
+    r"Apprentice|Amateur)\b",
+    re.I,
+)
+
+# ── Discipline detection — explicit keywords only, NO distance heuristics ──────
+# Check Jumps sub-types longest-first so "Novice Hurdle" beats "Hurdle".
+_DISC_JUMPS_SUBTYPES: List[tuple] = [
+    (re.compile(r"\b(hunter\s+chase)\b",                              re.I), "Chase"),
+    (re.compile(r"\b(novice\s+chase|beginners?\s+chase)\b",           re.I), "Chase"),
+    (re.compile(r"\b(steeplechase|chasing)\b",                        re.I), "Chase"),
+    (re.compile(r"\b(chase)\b",                                       re.I), "Chase"),
+    (re.compile(r"\b(novice\s+hurdle|maiden\s+hurdle)\b",             re.I), "Hurdle"),
+    (re.compile(r"\b(hurdles?)\b",                                    re.I), "Hurdle"),
+    (re.compile(r"\b(nh\s+flat|national\s+hunt\s+flat|bumper)\b",     re.I), "NH Flat"),
+]
+
+# "Flat" / "All-Weather" / "AW" / surface names count as explicit Flat signal
+_DISC_FLAT_RE = re.compile(
+    r"\b(flat\b|all[\s\-]weather|tapeta|polytrack)\b|\bAW\b", re.I
+)
+
+
+def _extract_header_section(text: str) -> str:
+    """Return the text that appears before the first HORSE: block."""
+    m = re.search(r"^HORSE\s*:", text, re.I | re.M)
+    return text[:m.start()].strip() if m else ""
+
+
+def parse_racecard_header(text: str) -> dict:
+    """Parse optional race-level metadata from the header section.
+
+    The header is everything before the first ``HORSE:`` line.
+    All returned fields may be ``None`` when not found.
+
+    Supports both formats:
+      Unstructured: "Newcastle Apprentice Handicap 6f • 8 Runners • Class 6"
+      Structured:   "COURSE: Newcastle\\nDISTANCE: 6f\\n..."
+    """
+    header = _extract_header_section(text)
+    result: dict = {
+        "course":     None,
+        "race_name":  None,
+        "distance":   None,
+        "field_size": None,
+        "race_class": None,
+        "race_type":  None,   # meeting type: Handicap / Maiden / etc.
+    }
+    if not header:
+        return result
+
+    # ── Pass 1: structured key:value lines ───────────────────────────────────
+    for line in header.split("\n"):
+        m = _HEADER_STRUCTURED_RE.match(line.strip())
+        if not m:
+            continue
+        key = m.group(1).strip().lower()
+        val = m.group(2).strip()
+        if "course" in key:
+            result["course"] = val
+        elif "distance" in key:
+            result["distance"] = val
+        elif "runner" in key:
+            nm = re.search(r"\d+", val)
+            if nm:
+                result["field_size"] = int(nm.group())
+        elif "class" in key:
+            result["race_class"] = val
+        elif "race" in key or "name" in key:
+            result["race_name"] = val
+        elif key == "type":
+            result["race_type"] = val
+
+    # ── Pass 2: unstructured patterns on any non-structured line ─────────────
+    all_known_courses = _IRISH_COURSES | _UK_COURSES
+    for line in header.split("\n"):
+        if _HEADER_STRUCTURED_RE.match(line.strip()):
+            continue   # already handled above
+        lt = line.lower()
+
+        if result["course"] is None:
+            for course in all_known_courses:
+                if course in lt:
+                    idx = lt.index(course)
+                    result["course"] = line[idx: idx + len(course)].strip().title()
+                    break
+
+        if result["distance"] is None:
+            dm = _DIST_HEADER_RE.search(line)
+            if dm:
+                result["distance"] = dm.group(1).replace(" ", "")
+
+        if result["field_size"] is None:
+            rm = _RUNNERS_HEADER_RE.search(line)
+            if rm:
+                result["field_size"] = int(rm.group(1))
+
+        if result["race_class"] is None:
+            cm = _CLASS_HEADER_RE.search(line)
+            if cm:
+                result["race_class"] = f"Class {cm.group(1).upper()}"
+
+        if result["race_type"] is None:
+            tm = _MEETING_TYPE_RE.search(line)
+            if tm:
+                result["race_type"] = tm.group(1).strip().title()
+
+    return result
+
+
+def detect_discipline(header_text: str) -> dict:
+    """Detect race discipline from the header section using EXPLICIT keywords only.
+
+    Never infers from distance, field size, or any heuristic.
+
+    Returns:
+        {"discipline": "Flat" | "Jumps" | "Unknown",
+         "subtype":    "Hurdle" | "Chase" | "NH Flat" | None}
+    """
+    # Check Jumps first — "NH Flat" contains the word "flat" so must take priority.
+    for pattern, subtype in _DISC_JUMPS_SUBTYPES:
+        if pattern.search(header_text):
+            return {"discipline": "Jumps", "subtype": subtype}
+
+    if _DISC_FLAT_RE.search(header_text):
+        return {"discipline": "Flat", "subtype": None}
+
+    return {"discipline": "Unknown", "subtype": None}
+
+
+def _discipline_display(discipline: str, subtype: Optional[str]) -> str:
+    """Return the UI-facing discipline label."""
+    if subtype:
+        return f"Race: Jumps ({subtype})"
+    if discipline != "Unknown":
+        return f"Race: {discipline}"
+    return "Race: Unknown"
+
+
+def _discipline_from_race_type(race_type: str) -> dict:
+    """Derive discipline for manual-entry mode from the user-selected race_type.
+
+    Manual-entry users explicitly choose their race type, so the discipline
+    is always known (never "Unknown").
+    """
+    if race_type == "national_hunt":
+        return {"discipline": "Jumps", "subtype": None}
+    if race_type == "flat":
+        return {"discipline": "Flat", "subtype": None}
+    return {"discipline": "Unknown", "subtype": None}
+
+
+# -------------------------------------------------
 # SHARED TEXT PARSER
 # -------------------------------------------------
 
@@ -475,7 +664,14 @@ def analyze(request: AnalyzeRequest):
         )
 
     engine.dark_horse_enabled = request.dark_horse_enabled
-    return engine.analyze(race, runner_objects, odds=request.odds)
+    result = engine.analyze(race, runner_objects, odds=request.odds)
+
+    # Discipline is always known in manual mode — user explicitly chose race_type.
+    disc = _discipline_from_race_type(request.race_type)
+    result["discipline"]         = disc["discipline"]
+    result["discipline_subtype"] = disc["subtype"]
+    result["discipline_display"] = _discipline_display(disc["discipline"], disc["subtype"])
+    return result
 
 
 # -------------------------------------------------
@@ -556,7 +752,14 @@ def detect_going(text: str) -> Optional[str]:
 
 @app.post("/analyze-text")
 def analyze_text(request: AnalyzeTextRequest):
-    # Auto-detect race type, country, and going from the pasted text
+    # ── Header metadata (optional — never raises on failure) ─────────────────
+    header_info = parse_racecard_header(request.racecard_text)
+
+    # ── Discipline: from header only, no guessing ─────────────────────────────
+    header_section = _extract_header_section(request.racecard_text)
+    disc = detect_discipline(header_section)
+
+    # ── Legacy auto-detects (unchanged) ──────────────────────────────────────
     detected_type    = detect_race_type(request.racecard_text)
     detected_country = detect_country(request.racecard_text)
     detected_going   = detect_going(request.racecard_text)
@@ -570,16 +773,22 @@ def analyze_text(request: AnalyzeTextRequest):
         )
 
     ri = request.race_info
-    # Use detected going when found; fall back to what the user supplied
-    going_str = detected_going if detected_going is not None else ri.going
+    # Use detected going when found; fall back to what the user supplied.
+    # Use header distance when found; fall back to what the user supplied.
+    going_str    = detected_going    if detected_going    is not None else ri.going
+    distance_str = header_info["distance"] if header_info["distance"] is not None else ri.distance
+    course_str   = header_info["course"]   if header_info["course"]   is not None else ri.course
+
     race = RaceInfo(
-        course=ri.course,
+        course=course_str,
         country=detected_country,
         race_type=detected_type,
         surface=ri.surface,
-        distance_f=parse_distance_to_furlongs(ri.distance),
+        distance_f=parse_distance_to_furlongs(distance_str),
         going=normalize_going(going_str),
         runners=len(runners),
+        discipline=disc["discipline"],
+        discipline_subtype=disc["subtype"],
     )
 
     runner_objects = [
@@ -604,7 +813,14 @@ def analyze_text(request: AnalyzeTextRequest):
     final_odds   = merged_odds if merged_odds else None
 
     engine.dark_horse_enabled = request.dark_horse_enabled
-    return engine.analyze(race, runner_objects, odds=final_odds)
+    result = engine.analyze(race, runner_objects, odds=final_odds)
+
+    # ── Attach header + discipline info to the response ───────────────────────
+    result["race_header"]        = header_info
+    result["discipline"]         = disc["discipline"]
+    result["discipline_subtype"] = disc["subtype"]
+    result["discipline_display"] = _discipline_display(disc["discipline"], disc["subtype"])
+    return result
 
 
 # -------------------------------------------------
@@ -643,6 +859,10 @@ def race_quality(request: RaceQualityRequest):
 @app.post("/race-quality-text")
 def race_quality_text(request: RaceQualityTextRequest):
     """Pre-analysis quality check for paste-mode racecards."""
+    header_info      = parse_racecard_header(request.racecard_text)
+    header_section   = _extract_header_section(request.racecard_text)
+    disc             = detect_discipline(header_section)
+
     detected_type    = detect_race_type(request.racecard_text)
     detected_country = detect_country(request.racecard_text)
     detected_going   = detect_going(request.racecard_text)
@@ -654,16 +874,21 @@ def race_quality_text(request: RaceQualityTextRequest):
             detail=f"Found {len(runners)} runner(s). Need at least 2.",
         )
 
-    ri = request.race_info
-    going_str = detected_going if detected_going is not None else ri.going
+    ri           = request.race_info
+    going_str    = detected_going    if detected_going    is not None else ri.going
+    distance_str = header_info["distance"] if header_info["distance"] is not None else ri.distance
+    course_str   = header_info["course"]   if header_info["course"]   is not None else ri.course
+
     race = RaceInfo(
-        course=ri.course,
+        course=course_str,
         country=detected_country,
         race_type=detected_type,
         surface=ri.surface,
-        distance_f=parse_distance_to_furlongs(ri.distance),
+        distance_f=parse_distance_to_furlongs(distance_str),
         going=normalize_going(going_str),
         runners=len(runners),
+        discipline=disc["discipline"],
+        discipline_subtype=disc["subtype"],
     )
     runner_objects = [
         Runner(
@@ -677,7 +902,11 @@ def race_quality_text(request: RaceQualityTextRequest):
         for r in runners
     ]
     result = engine.race_quality_check(race, runner_objects)
-    result["runner_names"] = [r.name for r in runner_objects]
+    result["runner_names"]       = [r.name for r in runner_objects]
+    result["race_header"]        = header_info
+    result["discipline"]         = disc["discipline"]
+    result["discipline_subtype"] = disc["subtype"]
+    result["discipline_display"] = _discipline_display(disc["discipline"], disc["subtype"])
     return result
 
 
