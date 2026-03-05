@@ -23,6 +23,8 @@ class RaceInfo:
     distance_f: int
     going: str
     runners: int
+    discipline: str = "Unknown"           # "Flat" | "Jumps" | "Unknown"
+    discipline_subtype: Optional[str] = None  # "Hurdle" | "Chase" | "NH Flat" | None
 
 
 @dataclass
