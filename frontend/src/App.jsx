@@ -4,7 +4,6 @@ import RaceForm from "./components/RaceForm";
 import RunnerTable from "./components/RunnerTable";
 import PasteInput from "./components/PasteInput";
 import ResultsPanel from "./components/ResultsPanel";
-import OddsInput from "./components/OddsInput";
 import Spinner from "./components/Spinner";
 
 /*
@@ -143,25 +142,12 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  // Odds — keyed by runner name, values are strings ("9/1", "evs", etc.)
-  const [odds, setOdds] = useState({});
-
   // Dark horse toggle — off by default; Gold + Silver only when false
   const [darkHorseEnabled, setDarkHorseEnabled] = useState(false);
 
-  // Reset odds when the racecard changes
-  const handlePasteChange = (val) => {
-    setPasteText(val);
-    setOdds({});
-  };
-  const handleRaceChange = (val) => {
-    setRace(val);
-    setOdds({});
-  };
-  const handleRunnersChange = (val) => {
-    setRunners(val);
-    setOdds({});
-  };
+  const handlePasteChange = (val) => setPasteText(val);
+  const handleRaceChange  = (val) => setRace(val);
+  const handleRunnersChange = (val) => setRunners(val);
 
   // Only require horse name + at least 2 runners for manual mode.
   const canSubmitManual =
@@ -188,14 +174,19 @@ export default function App() {
       // -----------------------------------------------------------------
       let payload;
 
-      // Strip empty odds values before sending
-      const activeOdds = Object.fromEntries(
-        Object.entries(odds).filter(([, v]) => v.trim() !== "")
+      // For manual mode, build odds dict from inline runner odds fields.
+      // For paste mode, odds are extracted per-runner in the backend parser
+      // (ODDS: field in each racecard block); no separate odds payload needed.
+      const inlineOdds = Object.fromEntries(
+        runners
+          .filter((r) => r.name.trim() && (r.odds || "").trim())
+          .map((r) => [r.name.trim(), r.odds.trim()])
       );
-      const oddsPayload = Object.keys(activeOdds).length > 0 ? activeOdds : undefined;
+      const manualOddsPayload = Object.keys(inlineOdds).length > 0 ? inlineOdds : undefined;
 
       if (inputMode === "paste") {
         // /analyze-text expects { race_info: {...}, racecard_text: "..." }
+        // Odds come from ODDS: fields inside the pasted racecard text.
         payload = {
           race_info: {
             course:    race.course || "Unknown",
@@ -206,7 +197,6 @@ export default function App() {
             going:     race.going,
           },
           racecard_text: pasteText,
-          odds: oddsPayload,
           dark_horse_enabled: darkHorseEnabled,
         };
       } else {
@@ -232,7 +222,7 @@ export default function App() {
             comment:          r.comment   || "",
             previous_runs:    buildPrevRuns(r.previous_runs),
           })),
-          odds: oddsPayload,
+          odds: manualOddsPayload,
           dark_horse_enabled: darkHorseEnabled,
         };
       }
@@ -306,15 +296,6 @@ export default function App() {
             </>
           ) : (
             <PasteInput value={pasteText} onChange={handlePasteChange} />
-          )}
-
-          {/* Odds panel — shown in manual mode once form is ready */}
-          {inputMode === "manual" && canSubmit && (
-            <OddsInput
-              runnerNames={runners.map((r) => r.name)}
-              odds={odds}
-              onChange={setOdds}
-            />
           )}
 
           {/* Dark Horse Toggle */}
