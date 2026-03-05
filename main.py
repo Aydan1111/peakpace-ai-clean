@@ -209,6 +209,23 @@ _DISCIPLINE_RE = re.compile(
     r"\b(chase|hurdle|flat|bumper|nh\s+flat|hunter\s+chase)\b", re.I
 )
 
+# Splits runs concatenated on a single line by date boundaries.
+# e.g. "Jan 9 2026 | Naas | ... | Chase Dec 13 2025 | ..." → two segments.
+_DATE_BOUNDARY_RE = re.compile(r"\b[A-Za-z]{3}\s+\d{1,2}\s+\d{4}\b")
+
+
+def _split_run_segments(text: str) -> list:
+    """Return individual run-record strings from text that may contain several
+    concatenated runs (each starting with a date token like 'Jan 9 2026')."""
+    positions = [m.start() for m in _DATE_BOUNDARY_RE.finditer(text)]
+    if not positions:
+        return []
+    chunks = []
+    for i, pos in enumerate(positions):
+        end = positions[i + 1] if i + 1 < len(positions) else len(text)
+        chunks.append(text[pos:end].strip())
+    return [c for c in chunks if c]
+
 # Recognise going labels within a previous-run line segment
 _GOING_WORDS = re.compile(
     r"\b(heavy|soft|good\s+to\s+soft|good\s+soft|good\s+to\s+firm|good|firm|"
@@ -299,7 +316,16 @@ def parse_racecard_text(text: str) -> list:
         if horse_m:
             if current and "name" in current:
                 runners.append(current)
-            current = {"name": horse_m.group(1).strip()}
+            rest = horse_m.group(1).strip()
+            # Single-line: "Karamoja JOCKEY: P. Townend TRAINER: ..."
+            # Stop name at first field key; process the rest as fields.
+            first_fk = FIELD_KEYS.search(rest)
+            if first_fk:
+                name = rest[:first_fk.start()].strip()
+                current = {"name": name}
+                _extract_fields(current, rest[first_fk.start():])
+            else:
+                current = {"name": rest}
             in_prev_runs = False
             comment_pending = False
             continue
@@ -318,9 +344,18 @@ def parse_racecard_text(text: str) -> list:
 
         # ── Previous runs section header ─────────────────────────────────────
         # Accepts: "Previous runs:", "Previous run:", "Recent runs:", "Recent run:"
-        if re.match(r"(?:previous|recent)\s+runs?\s*:?", line, re.I):
+        rr_m = re.match(r"(?:previous|recent)\s+runs?\s*:?\s*(.*)", line, re.I)
+        if rr_m:
             in_prev_runs = True
             current.setdefault("previous_runs", [])
+            # Runs may appear on the same line as the header (single-line format).
+            # Multiple runs can be concatenated; split by date boundaries.
+            inline = rr_m.group(1).strip()
+            if inline:
+                for seg in _split_run_segments(inline):
+                    pr = _parse_prev_run_line(seg)
+                    if pr is not None:
+                        current["previous_runs"].append(pr)
             continue
 
         # ── Previous run record ──────────────────────────────────────────────
@@ -332,8 +367,18 @@ def parse_racecard_text(text: str) -> list:
             if pr is not None:
                 current["previous_runs"].append(pr)
                 continue
-            else:
-                in_prev_runs = False   # non-matching line exits the section
+            # Line didn't match a single run — try splitting as concatenated runs
+            segments = _split_run_segments(line)
+            if segments:
+                any_parsed = False
+                for seg in segments:
+                    pr = _parse_prev_run_line(seg)
+                    if pr is not None:
+                        current["previous_runs"].append(pr)
+                        any_parsed = True
+                if any_parsed:
+                    continue
+            in_prev_runs = False   # non-matching line exits the section
 
         # ── Bare "COMMENT:" label with no inline text ─────────────────────────
         if re.match(r"^comment\s*:\s*$", line, re.I):
