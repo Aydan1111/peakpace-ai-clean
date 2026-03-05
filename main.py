@@ -168,8 +168,13 @@ _MEETING_TYPE_RE = re.compile(
     re.I,
 )
 
-# ── Discipline detection — explicit keywords only, NO distance heuristics ──────
-# Check Jumps sub-types longest-first so "Novice Hurdle" beats "Hurdle".
+# ── Discipline detection — 3-level priority system ────────────────────────────
+#
+# Level 1: TYPE: field in the structured header (user override — highest priority)
+# Level 2: Explicit keywords anywhere in the header text
+# Level 3: Distance fallback (≥ 2m2f = 18f → Jumps, else → Flat)
+#
+# Check Jumps sub-types longest-first so "Novice Hurdle" beats bare "Hurdle".
 _DISC_JUMPS_SUBTYPES: List[tuple] = [
     (re.compile(r"\b(hunter\s+chase)\b",                              re.I), "Chase"),
     (re.compile(r"\b(novice\s+chase|beginners?\s+chase)\b",           re.I), "Chase"),
@@ -180,10 +185,45 @@ _DISC_JUMPS_SUBTYPES: List[tuple] = [
     (re.compile(r"\b(nh\s+flat|national\s+hunt\s+flat|bumper)\b",     re.I), "NH Flat"),
 ]
 
-# "Flat" / "All-Weather" / "AW" / surface names count as explicit Flat signal
+# Explicit Flat surface/discipline keywords
 _DISC_FLAT_RE = re.compile(
     r"\b(flat\b|all[\s\-]weather|tapeta|polytrack)\b|\bAW\b", re.I
 )
+
+# TYPE: field values that map directly to a discipline (level 1 override)
+_TYPE_OVERRIDE_MAP = {
+    "flat":     {"discipline": "Flat",  "subtype": None},
+    "hurdle":   {"discipline": "Jumps", "subtype": "Hurdle"},
+    "hurdles":  {"discipline": "Jumps", "subtype": "Hurdle"},
+    "chase":    {"discipline": "Jumps", "subtype": "Chase"},
+    "nh flat":  {"discipline": "Jumps", "subtype": "NH Flat"},
+    "nh_flat":  {"discipline": "Jumps", "subtype": "NH Flat"},
+    "bumper":   {"discipline": "Jumps", "subtype": "NH Flat"},
+}
+
+# Distance threshold for the distance fallback: 2m2f = 18 furlongs
+_JUMPS_MIN_FURLONGS = 18
+
+
+def _safe_parse_furlongs(dist_str: str) -> Optional[int]:
+    """Parse a header distance string to furlongs without raising.
+
+    Handles e.g. '6f', '2m', '2m4f', '2m 4f'. Returns None on failure.
+    """
+    try:
+        s = dist_str.lower().strip().replace(" ", "")
+        miles = 0
+        furlongs = 0
+        mm = re.search(r"(\d+)m", s)
+        ff = re.search(r"(\d+)f", s)
+        if mm:
+            miles = int(mm.group(1))
+        if ff:
+            furlongs = int(ff.group(1))
+        total = miles * 8 + furlongs
+        return total if total > 0 else None
+    except Exception:
+        return None
 
 
 def _extract_header_section(text: str) -> str:
@@ -274,21 +314,54 @@ def parse_racecard_header(text: str) -> dict:
 
 
 def detect_discipline(header_text: str) -> dict:
-    """Detect race discipline from the header section using EXPLICIT keywords only.
+    """Detect race discipline using a strict 3-level priority system.
 
-    Never infers from distance, field size, or any heuristic.
+    Level 1 — TYPE: override (highest priority)
+        TYPE: Flat / Hurdle / Chase / NH Flat in the structured header
+        immediately resolves discipline; no further checks needed.
+
+    Level 2 — Keyword detection
+        Searches the header for explicit Jumps or Flat keywords.
+        Jumps sub-types are matched longest-first to avoid ambiguity
+        (e.g. "NH Flat" must not match bare "flat").
+
+    Level 3 — Distance fallback (only when levels 1 & 2 both fail)
+        distance ≥ 2m2f (18f) → Jumps
+        distance < 2m2f       → Flat
+        If no distance is in the header either → "Unknown".
 
     Returns:
         {"discipline": "Flat" | "Jumps" | "Unknown",
          "subtype":    "Hurdle" | "Chase" | "NH Flat" | None}
     """
-    # Check Jumps first — "NH Flat" contains the word "flat" so must take priority.
+    # ── Level 1: TYPE: field override ────────────────────────────────────────
+    for line in header_text.split("\n"):
+        m = re.match(r"^TYPE\s*:\s*(.+)", line.strip(), re.I)
+        if m:
+            type_val = m.group(1).strip().lower()
+            if type_val in _TYPE_OVERRIDE_MAP:
+                return dict(_TYPE_OVERRIDE_MAP[type_val])
+            # TYPE: is present but its value is a meeting type (e.g. "Handicap"),
+            # not a discipline word — fall through to keyword detection.
+            break
+
+    # ── Level 2: keyword detection ───────────────────────────────────────────
+    # Jumps checked before Flat because "NH Flat" contains the word "flat".
     for pattern, subtype in _DISC_JUMPS_SUBTYPES:
         if pattern.search(header_text):
             return {"discipline": "Jumps", "subtype": subtype}
 
     if _DISC_FLAT_RE.search(header_text):
         return {"discipline": "Flat", "subtype": None}
+
+    # ── Level 3: distance fallback ───────────────────────────────────────────
+    dm = _DIST_HEADER_RE.search(header_text)
+    if dm:
+        dist_f = _safe_parse_furlongs(dm.group(1))
+        if dist_f is not None:
+            if dist_f >= _JUMPS_MIN_FURLONGS:
+                return {"discipline": "Jumps", "subtype": None}
+            return {"discipline": "Flat", "subtype": None}
 
     return {"discipline": "Unknown", "subtype": None}
 

@@ -1,15 +1,15 @@
 """
-Header parsing + discipline detection — 4-scenario validation.
+Header parsing + discipline detection — 5-scenario validation.
 
-Verifies:
-  1. Flat header (unstructured + explicit "Flat" keyword)         → discipline=Flat
-  2. Hurdle header                                                → discipline=Jumps, subtype=Hurdle
-  3. Chase header                                                 → discipline=Jumps, subtype=Chase
-  4. Header with no discipline keywords (classic flat handicap)   → discipline=Unknown
-  Each scenario also confirms runners parse correctly and the engine runs.
+Scenarios:
+  1. TYPE: Flat override                → discipline=Flat      (level 1)
+  2. TYPE: Hurdle override              → discipline=Jumps, Hurdle (level 1)
+  3. Chase keyword (no TYPE: field)     → discipline=Jumps, Chase  (level 2)
+  4. Flat race, no keywords, 6f dist    → discipline=Flat     (level 3 fallback)
+  5. Header missing entirely            → discipline=Unknown, engine still runs
 """
 
-import sys, json
+import sys
 sys.path.insert(0, "/home/user/peakpace-ai-clean")
 
 from main import (
@@ -24,13 +24,13 @@ from main import (
     detect_country,
     detect_going,
 )
-from racing_ai_core import RacingAICore, RaceInfo, Runner, _parse_odds
+from racing_ai_core import RacingAICore, RaceInfo, Runner
 
 engine = RacingAICore()
-engine.dark_horse_enabled = True
+engine.dark_horse_enabled = False
 
-# ── Shared minimal runner block (2 runners — minimum for the engine) ──────────
-RUNNER_BLOCK = """
+# ── Minimal 2-runner block shared by all scenarios ───────────────────────────
+RUNNERS = """
 HORSE: Silver Arrow
 JOCKEY: Oisin Murphy
 TRAINER: John Gosden
@@ -50,76 +50,92 @@ ODDS: 3/1
 COMMENT: Consistent type, should run his race.
 """
 
-# ── SCENARIO 1 — Flat header with explicit "Flat" keyword ────────────────────
-FLAT_RACECARD = """\
-Newcastle Midnite Flat Race: All-Weather Apprentice Handicap Flat 6f • 8 Runners • Class 6
+# ── Five racecards ────────────────────────────────────────────────────────────
+
+# 1. TYPE: Flat override — should beat any distance heuristic
+RACECARD_1 = """\
+COURSE: Newcastle
+DISTANCE: 6f
+RUNNERS: 8
+CLASS: Class 6
+TYPE: Flat
 Going: Standard
-""" + RUNNER_BLOCK
+""" + RUNNERS
 
-# ── SCENARIO 2 — Hurdle header ────────────────────────────────────────────────
-HURDLE_RACECARD = """\
-Cheltenham Festival — Novice Hurdle 2m • 12 Runners • Class 1
+# 2. TYPE: Hurdle override
+RACECARD_2 = """\
+COURSE: Cheltenham
+DISTANCE: 2m
+RUNNERS: 12
+CLASS: Class 1
+TYPE: Hurdle
 Going: Good to Soft
-""" + RUNNER_BLOCK
+""" + RUNNERS
 
-# ── SCENARIO 3 — Chase header ─────────────────────────────────────────────────
-CHASE_RACECARD = """\
+# 3. Chase keyword — no TYPE: field, keyword detection fires
+RACECARD_3 = """\
 Aintree Grand National Chase 4m2f • 40 Runners • Class 1
 Going: Good
-""" + RUNNER_BLOCK
+""" + RUNNERS
 
-# ── SCENARIO 4 — No discipline keywords (classic handicap, no "Flat" stated) ──
-UNKNOWN_RACECARD = """\
-Newcastle Midnite: Built For 2026 Not 2006 Apprentice Handicap 6f Hcap • 8 Runners • Class 6
+# 4. Flat race — no TYPE:, no keywords, 6f distance → fallback → Flat
+RACECARD_4 = """\
+Newcastle Midnite: Built For 2026 Apprentice Handicap 6f Hcap • 8 Runners • Class 6
 Going: Standard
-""" + RUNNER_BLOCK
+""" + RUNNERS
+
+# 5. Header missing entirely — only runner block, no header at all
+RACECARD_5 = RUNNERS.strip()
 
 SCENARIOS = [
-    ("1 — Flat (explicit)",    FLAT_RACECARD,    "Flat",    None),
-    ("2 — Hurdle",             HURDLE_RACECARD,  "Jumps",   "Hurdle"),
-    ("3 — Chase",              CHASE_RACECARD,   "Jumps",   "Chase"),
-    ("4 — No discipline kw",   UNKNOWN_RACECARD, "Unknown", None),
+    # (label, racecard, expect_disc, expect_subtype, expect_level)
+    ("1 — TYPE: Flat override",      RACECARD_1, "Flat",    None,     "level 1"),
+    ("2 — TYPE: Hurdle override",    RACECARD_2, "Jumps",   "Hurdle", "level 1"),
+    ("3 — Chase keyword",            RACECARD_3, "Jumps",   "Chase",  "level 2"),
+    ("4 — Distance fallback (6f)",   RACECARD_4, "Flat",    None,     "level 3"),
+    ("5 — No header at all",         RACECARD_5, "Unknown", None,     "n/a"),
 ]
 
 
-def _run_scenario(label, racecard, expect_disc, expect_subtype):
-    print(f"\n{'─'*60}")
+def _run(label, racecard, expect_disc, expect_subtype, expect_level):
+    print(f"\n{'─'*62}")
     print(f"  SCENARIO {label}")
-    print(f"{'─'*60}")
+    print(f"{'─'*62}")
 
-    # ── Header parse ─────────────────────────────────────────────
-    header   = parse_racecard_header(racecard)
-    hdr_text = _extract_header_section(racecard)
-    disc     = detect_discipline(hdr_text)
-    display  = _discipline_display(disc["discipline"], disc["subtype"])
+    header_info = parse_racecard_header(racecard)
+    hdr_text    = _extract_header_section(racecard)
+    disc        = detect_discipline(hdr_text)
+    display     = _discipline_display(disc["discipline"], disc["subtype"])
 
-    print(f"  Header fields:")
-    for k, v in header.items():
-        print(f"    {k:<12}: {v}")
-    print(f"  Discipline   : {disc['discipline']}")
-    print(f"  Subtype      : {disc['subtype']}")
-    print(f"  Display label: {display}")
+    print(f"  Header: course={header_info['course']!r}  "
+          f"distance={header_info['distance']!r}  "
+          f"class={header_info['race_class']!r}  "
+          f"race_type={header_info['race_type']!r}")
+    print(f"  Detected : discipline={disc['discipline']!r}  "
+          f"subtype={disc['subtype']!r}")
+    print(f"  Display  : {display}")
+    print(f"  Level    : {expect_level}")
 
-    # ── Assertion ────────────────────────────────────────────────
     disc_ok    = disc["discipline"] == expect_disc
     subtype_ok = disc["subtype"]    == expect_subtype
-    print(f"  discipline == '{expect_disc}'  : {'PASS' if disc_ok    else 'FAIL'}")
-    print(f"  subtype    == '{expect_subtype}': {'PASS' if subtype_ok else 'FAIL'}")
+    print(f"  discipline == {expect_disc!r}  : {'PASS' if disc_ok    else 'FAIL'}")
+    print(f"  subtype    == {expect_subtype!r}: {'PASS' if subtype_ok else 'FAIL'}")
 
-    # ── Runner parse ─────────────────────────────────────────────
+    # Runner parse
     runners_raw = parse_racecard_text(racecard)
     parse_ok    = len(runners_raw) == 2
-    print(f"  Runners parsed: {len(runners_raw)} (expected 2) — {'PASS' if parse_ok else 'FAIL'}")
+    print(f"  Runners parsed : {len(runners_raw)} (expected 2) — {'PASS' if parse_ok else 'FAIL'}")
 
-    # ── Engine run ───────────────────────────────────────────────
+    # Engine run
     engine_ok = False
     try:
-        going_detected = detect_going(racecard)
-        going_str      = going_detected if going_detected else "good"
-        dist_str       = header.get("distance") or "8f"
+        going_raw    = detect_going(racecard)
+        going_str    = going_raw if going_raw else "good"
+        dist_str     = header_info.get("distance") or "8f"
+        course_str   = header_info.get("course")   or "Unknown"
 
         race_info = RaceInfo(
-            course=header.get("course") or "Unknown",
+            course=course_str,
             country=detect_country(racecard),
             race_type=detect_race_type(racecard),
             surface="turf",
@@ -133,7 +149,10 @@ def _run_scenario(label, racecard, expect_disc, expect_subtype):
             Runner(
                 name=r["name"],
                 age=r["age"],
-                weight_lbs=int(r["weight"].replace("-", "")) if "-" in r["weight"] else 120,
+                weight_lbs=parse_distance_to_furlongs(r["weight"].replace("-", "f")) * 0 + (
+                    int(r["weight"].split("-")[0]) * 14 + int(r["weight"].split("-")[1])
+                    if "-" in r["weight"] else 120
+                ),
                 form=r["form"],
                 trainer=r["trainer"],
                 jockey=r["jockey"],
@@ -147,31 +166,35 @@ def _run_scenario(label, racecard, expect_disc, expect_subtype):
         result = engine.analyze(race_info, runner_objects, odds=odds or None)
         gold = result.get("gold_pick", {}).get("name", "N/A")
         conf = result.get("race_confidence", "?")
-        disc_in_result = result.get("discipline", "—")
-        print(f"  Engine gold  : {gold} ({conf})")
-        print(f"  discipline in RaceInfo.discipline: {race_info.discipline}")
+        print(f"  Engine gold    : {gold} ({conf})")
+        print(f"  RaceInfo.discipline stored : {race_info.discipline!r}")
         engine_ok = True
     except Exception as e:
-        print(f"  ENGINE ERROR : {e}")
+        print(f"  ENGINE ERROR   : {e}")
 
     overall = "PASS" if (disc_ok and subtype_ok and parse_ok and engine_ok) else "FAIL"
-    print(f"  Overall      : {overall}")
+    print(f"  Overall        : {overall}")
     return overall
 
 
 def main():
-    print(f"\n{'='*60}")
-    print(f"  PeakPace AI — Header Parsing + Discipline Detection Tests")
-    print(f"{'='*60}")
+    print(f"\n{'='*62}")
+    print(f"  PeakPace AI — 3-Level Discipline Detection Tests")
+    print(f"{'='*62}")
 
     results = []
-    for label, racecard, expect_disc, expect_subtype in SCENARIOS:
-        outcome = _run_scenario(label, racecard, expect_disc, expect_subtype)
-        results.append(outcome)
+    for args in SCENARIOS:
+        results.append(_run(*args))
 
-    print(f"\n{'─'*60}")
-    print(f"  Summary: {results.count('PASS')}/{len(results)} scenarios passed")
-    print(f"{'─'*60}\n")
+    passed = results.count("PASS")
+    print(f"\n{'─'*62}")
+    print(f"  Summary : {passed}/{len(results)} scenarios passed")
+    if passed == len(results):
+        print(f"  All tests PASS")
+    else:
+        failed = [SCENARIOS[i][0] for i, r in enumerate(results) if r != "PASS"]
+        print(f"  FAILED  : {failed}")
+    print(f"{'─'*62}\n")
 
 
 if __name__ == "__main__":
