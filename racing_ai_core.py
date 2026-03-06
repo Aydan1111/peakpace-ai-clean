@@ -76,33 +76,51 @@ def _parse_odds(raw: str) -> Optional[float]:
 def _parse_stats_file(filename: str) -> Dict[str, dict]:
     """Parse trainer/jockey/horse stats files.
 
-    Format: Name — Runs (N) | 1st (N) | 2nd (N) | ... | Total Prize Money (€N)
-    Returns dict: lowercase name → {runs, wins, prize}
+    Handles two formats:
+      Irish: Name (Runs: N | 1st: N | 2nd: N | ... | Total Prize Money: N)
+      UK:    Name (Season: Y | Rank: N | Wins: N | Runs/Rides: N | ...)
+
+    The stats block starts at the first '(' followed by one of the known field keys.
+    Returns dict: lowercase normalised name → {runs, wins, prize}
     """
     result = {}
     filepath = os.path.join(_DATA_DIR, filename)
     if not os.path.exists(filepath):
         return result
 
+    _BLOCK_START = re.compile(r"\((Runs:|Season:|Wins:|Rides:|Rank:)")
+
     with open(filepath, encoding="utf-8") as f:
         for line in f:
             line = line.strip()
-            if not line or "—" not in line:
+            if not line:
                 continue
             try:
-                name_part, stats_part = line.split("—", 1)
-                name = name_part.strip().lower()
+                m = _BLOCK_START.search(line)
+                if not m:
+                    continue
 
-                runs_m = re.search(r"Runs \((\d+)\)", stats_part)
-                wins_m = re.search(r"1st \((\d+)\)", stats_part)
-                prize_m = re.search(r"Total Prize Money \(€([\d,]+)\)", stats_part)
+                raw_name = line[: m.start()].strip()
+                stats_str = line[m.start():]
 
-                if runs_m and wins_m:
-                    runs = int(runs_m.group(1))
-                    wins = int(wins_m.group(1))
-                    prize = int(prize_m.group(1).replace(",", "")) if prize_m else 0
-                    if runs > 0:
-                        result[name] = {"runs": runs, "wins": wins, "prize": prize}
+                runs_m  = re.search(r"\bRuns:\s*(\d+)",  stats_str)
+                rides_m = re.search(r"\bRides:\s*(\d+)", stats_str)
+                wins_m  = re.search(r"\b(?:Wins|1st):\s*(\d+)", stats_str)
+                prize_m = re.search(r"Total Prize Money:\s*([\d,]+)", stats_str)
+
+                run_match = runs_m or rides_m
+                if not run_match:
+                    continue
+                runs  = int(run_match.group(1))
+                wins  = int(wins_m.group(1)) if wins_m else 0
+                prize = int(prize_m.group(1).replace(",", "")) if prize_m else 0
+
+                if runs == 0:
+                    continue
+
+                name = _normalize_name(raw_name)
+                if name:
+                    result[name] = {"runs": runs, "wins": wins, "prize": prize}
             except Exception:
                 continue
     return result
@@ -111,25 +129,50 @@ def _parse_stats_file(filename: str) -> Dict[str, dict]:
 def _parse_ratings_file(filename: str) -> Dict[str, int]:
     """Parse horse ratings files.
 
-    Format: Name — Rating (N) | Trainer (Name)
-    Returns dict: lowercase name → rating (int)
+    Handles three formats:
+      Irish flat: HorseName YearBorn Sex DamName SireName Trainer (Rating: N)
+      Irish NH:   HorseName (CountryCode)? (Rating: N)
+      UK flat:    HORSE NAME (IRE) (Rank: N | Flat Rating: N | ...)
+      UK jumps:   HORSE NAME (GB) (Rank: N | Best Jumps Rating: N | ...)
+
+    The stats block starts at the first '(' followed by 'Rating:' or 'Rank:'.
+    Returns dict: lowercase normalised name → rating (int)
     """
     result = {}
     filepath = os.path.join(_DATA_DIR, filename)
     if not os.path.exists(filepath):
         return result
 
+    _BLOCK_START = re.compile(r"\((Rating:|Rank:)")
+
     with open(filepath, encoding="utf-8") as f:
         for line in f:
             line = line.strip()
-            if not line or "—" not in line:
+            if not line:
                 continue
             try:
-                name_part, rest = line.split("—", 1)
-                name = name_part.strip().lower()
-                rating_m = re.search(r"Rating \((\d+)\)", rest)
-                if rating_m:
-                    result[name] = int(rating_m.group(1))
+                m = _BLOCK_START.search(line)
+                if not m:
+                    continue
+
+                raw_name_part = line[: m.start()].strip()
+                stats_str = line[m.start():]
+
+                # Try field names in priority order
+                rating_m = re.search(
+                    r"(?:Best Jumps Rating|Flat Rating|Rating):\s*(\d+)",
+                    stats_str,
+                )
+                if not rating_m:
+                    continue
+                rating = int(rating_m.group(1))
+
+                # Irish flat format includes year + extra tokens after the horse name;
+                # strip year and everything that follows it.
+                name_part = re.sub(r"\s+\d{4}\b.*$", "", raw_name_part).strip()
+                name = _normalize_name(name_part)
+                if name:
+                    result[name] = rating
             except Exception:
                 continue
     return result
