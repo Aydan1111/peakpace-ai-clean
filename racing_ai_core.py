@@ -1402,16 +1402,25 @@ class RacingAICore:
         gold_name   = gold_entry["name"]   if gold_entry   else None
         silver_name = silver_entry["name"] if silver_entry else None
 
-        # Dark horse: value pick from model ranks 3–6 that satisfies all three
-        # criteria — odds in range [6/1, 33/1], score ≥ 85% of gold, not already
-        # a main pick.  Only populated when dark_horse_enabled is True; otherwise
-        # the selection is skipped entirely so output stays Gold + Silver only.
+        # ── Dark horse selection ──────────────────────────────────────────────
+        # When dark_horse_enabled is True a dark horse is ALWAYS returned for
+        # any field with ≥3 runners (guaranteed by the fallback below).
+        # When False, only Gold + Silver are returned; selection is skipped.
+        #
+        # Priority:
+        #   Primary  — sensible value pick: rank 3–6, odds [6/1, 33/1],
+        #              score ≥ 85% of gold, not already gold/silver.
+        #   Fallback — if primary finds nothing: best-remaining runner by score,
+        #              avoiding extreme outsiders (>50/1) when possible.
+        #              Never returns gold or silver.
         dark = None
         if self.dark_horse_enabled:
             _dh_min_dec     = 7.0    # 6/1  in decimal
             _dh_max_dec     = 34.0   # 33/1 in decimal
             _dh_score_floor = 0.85 * (gold_entry["score"] if gold_entry else 0.0)
             _main_names     = {gold_name, silver_name}
+
+            # ── Primary: strict value criteria (ranks 3–6) ───────────────────
             for _dh_rank, candidate in enumerate(scored):
                 if _dh_rank < 2:
                     continue                      # ranks 1 & 2 are gold/silver
@@ -1423,13 +1432,32 @@ class RacingAICore:
                     continue
                 _cand_dec = _odds_decimal.get(_normalize_name(candidate["name"]))
                 if _cand_dec is None:
-                    continue                      # odds required for dark horse
+                    continue                      # odds required for primary pick
                 if not (_dh_min_dec <= _cand_dec <= _dh_max_dec):
                     continue
-                # First qualifying candidate (highest-scored among ranks 3–6)
+                # First qualifying candidate wins
                 dark = {**candidate, "label": "Value Play",
                         "writeup": _wp(candidate)}
                 break
+
+            # ── Fallback: guarantee a pick when primary criteria find nothing ─
+            # Selects the highest-scoring remaining runner (not gold/silver).
+            # Avoids extreme outsiders (>50/1) when a sensible alternative
+            # exists; if odds are absent, uses score ranking only.
+            if dark is None:
+                _remaining = [h for h in scored if h["name"] not in _main_names]
+                if _remaining:
+                    _EXTREME_DEC = 51.0
+                    _sensible = [
+                        h for h in _remaining
+                        if _odds_decimal.get(
+                            _normalize_name(h["name"]), 0.0
+                        ) < _EXTREME_DEC
+                    ]
+                    _pool = _sensible if _sensible else _remaining
+                    _best = max(_pool, key=lambda h: h["score"])
+                    dark = {**_best, "label": "Value Play",
+                            "writeup": _wp(_best)}
 
         dark_name = dark["name"] if dark else None
 

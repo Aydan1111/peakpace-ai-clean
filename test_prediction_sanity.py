@@ -615,43 +615,32 @@ def test_dark_horse_selection() -> None:
             violations.append(
                 f"Race {race_idx}: {len(all_picks)} picks returned (max 3)")
 
+        # Behaviour change: dark horse is ALWAYS returned when enabled (≥3 runners).
+        # Primary path: rank 3–6, odds [6/1,33/1], score ≥85% of gold.
+        # Fallback path: best remaining by score (not gold/silver), avoids extreme outsiders.
         if dark_pick is None:
+            violations.append(
+                f"Race {race_idx}: dark_horse is None when enabled (must always return)")
             no_dh_races += 1
             continue
 
         dark_found += 1
-        ranked_names = [e["name"] for e in rankings]
-        dh_rank = (ranked_names.index(dark_pick["name"]) + 1
-                   if dark_pick["name"] in ranked_names else 999)
 
-        # Rule: dark horse must not be rank 1 or 2
-        if dh_rank <= 2:
+        # Core invariant: dark horse must never be the same pick as gold or silver.
+        # (It may legitimately be ranked #2 by score if silver went to a different
+        #  horse via _best_pick's data-quality filter — that is expected behaviour.)
+        gold_pick_name   = gold_pick["name"]   if gold_pick   else None
+        silver_pick_name = result.get("silver_pick", {})
+        silver_pick_name = silver_pick_name["name"] if silver_pick_name else None
+        if dark_pick["name"] in {gold_pick_name, silver_pick_name}:
             violations.append(
-                f"Race {race_idx}: dark horse '{dark_pick['name']}' is rank {dh_rank}")
+                f"Race {race_idx}: dark horse '{dark_pick['name']}' "
+                f"is same as gold or silver pick")
 
-        # Rule: dark horse must be within ranks 3–6
-        if dh_rank > 6:
-            violations.append(
-                f"Race {race_idx}: dark horse '{dark_pick['name']}' is rank {dh_rank} (>6)")
-
-        # Rule: odds within 6/1–33/1
-        raw_dh_odds = odds.get(dark_pick["name"])
-        if raw_dh_odds:
-            dec = _parse_odds(raw_dh_odds)
-            if dec is not None and not (_DH_MIN <= dec <= _DH_MAX):
-                violations.append(
-                    f"Race {race_idx}: dark horse odds '{raw_dh_odds}' "
-                    f"(dec={dec:.2f}) outside 6/1–33/1")
-
-        # Rule: score >= 0.85 × gold_score
-        if gold_pick:
-            floor = 0.85 * gold_pick["score"]
-            if dark_pick["score"] < floor:
-                violations.append(
-                    f"Race {race_idx}: dark horse score {dark_pick['score']:.4f} "
-                    f"< 0.85 × gold {gold_pick['score']:.4f} = {floor:.4f}")
-
-    # ── Suite B: extreme odds → no qualifying dark horse ────────────────────
+    # ── Suite B: extreme odds → fallback guarantees a pick ──────────────────
+    # With the always-return guarantee, even races where all non-gold/silver
+    # runners have extreme odds (40/1+) must still return a dark horse via the
+    # fallback (best remaining by score, ignoring the odds floor).
     NQ_RACES     = 20
     no_qual_none = 0
     for race_idx in range(NQ_RACES):
@@ -683,9 +672,10 @@ def test_dark_horse_selection() -> None:
                 nq_odds[r.name] = random.choice(_EXTREME_ODDS)  # 40/1+
 
         result = dh_engine.analyze(race, field, odds=nq_odds)
-        if result.get("dark_horse") is None:
-            no_qual_none += 1
+        if result.get("dark_horse") is not None:
+            no_qual_none += 1   # now counts races where fallback correctly returned a pick
 
+    # Percentage of extreme-odds races that returned a dark horse via fallback
     no_qual_pct = round(no_qual_none / NQ_RACES * 100, 1)
 
     # ── Suite C: default engine (disabled) returns no dark horse ────────────
@@ -715,17 +705,17 @@ def test_dark_horse_selection() -> None:
     print("=" * 60)
     print("Dark Horse Selection Test")
     print("=" * 60)
-    print(f"Suite A — {DH_RACES} races with qualified candidates:")
-    print(f"  Dark horse found        : {dark_found}")
-    print(f"  No qualifying candidate : {no_dh_races}")
+    print(f"Suite A — {DH_RACES} races (dark horse always returned when enabled):")
+    print(f"  Dark horse returned     : {dark_found}")
+    print(f"  Unexpectedly None       : {no_dh_races}")
     print(f"  Rule violations         : {len(violations)}")
     if violations:
         print("  First violations:")
         for v in violations[:5]:
             print(f"    VIOLATION: {v}")
     print()
-    print(f"Suite B — extreme odds races (DH should be None):")
-    print(f"  Returned None : {no_qual_none}/{NQ_RACES} ({no_qual_pct}%)")
+    print(f"Suite B — extreme odds races (fallback must return a pick):")
+    print(f"  Returned via fallback : {no_qual_none}/{NQ_RACES} ({no_qual_pct}%)")
     print()
     print(f"Suite C — default engine (dark_horse_enabled=False):")
     print(f"  Dark horse returned (should be 0): {default_dh_found}/20")
@@ -737,11 +727,11 @@ def test_dark_horse_selection() -> None:
     )
     print("PASS: all dark horse rule checks passed")
 
-    assert no_qual_pct >= 80, (
-        f"FAIL: only {no_qual_pct}% of extreme-odds races returned no dark horse "
-        f"(expected ≥80%)"
+    assert no_qual_pct == 100.0, (
+        f"FAIL: only {no_qual_pct}% of extreme-odds races returned a dark horse via "
+        f"fallback (expected 100%)"
     )
-    print(f"PASS: no-qualifier scenario {no_qual_pct}% returned None  (threshold ≥80%)")
+    print(f"PASS: fallback fired in {no_qual_pct}% of extreme-odds races  (threshold 100%)")
 
     assert default_dh_found == 0, (
         f"FAIL: default engine returned {default_dh_found} dark horse(s) "
