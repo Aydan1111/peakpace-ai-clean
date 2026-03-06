@@ -12,6 +12,8 @@ Metrics reported:
   - Parser failures (missing fields, wrong counts)
   - Scoring anomalies (ties, missing scores, NaN)
   - Pipeline equivalence: paste vs. manual produce identical runner objects
+  - Historical data coverage: live-data hits per runner (trainer / jockey / horse)
+  - Connections multiplier distribution vs. baseline (hardcoded fallbacks only)
 """
 
 import sys
@@ -34,7 +36,19 @@ from main import (
     detect_country,
     detect_going,
 )
-from racing_ai_core import RacingAICore, RaceInfo, Runner
+from racing_ai_core import (
+    RacingAICore, RaceInfo, Runner,
+    _normalize_name,
+    _TRAINER_DATA_FLAT, _TRAINER_DATA_NH,
+    _JOCKEY_DATA_FLAT,  _JOCKEY_DATA_NH,
+    _HORSE_RATINGS_FLAT, _HORSE_RATINGS_NH,
+    _HORSE_STATS_FLAT,   _HORSE_STATS_NH,
+    _UK_TRAINER_DATA_FLAT, _UK_TRAINER_DATA_NH,
+    _UK_JOCKEY_DATA_FLAT,  _UK_JOCKEY_DATA_NH,
+    _UK_HORSE_RATINGS_FLAT, _UK_HORSE_RATINGS_NH,
+    _UK_HORSE_STATS_FLAT,   _UK_HORSE_STATS_NH,
+    _UK_TRAINER_FALLBACK, _UK_JOCKEY_FALLBACK,
+)
 
 # ── Seeded RNG for reproducibility ──────────────────────────────────────────
 RNG = random.Random(20260305)
@@ -487,6 +501,40 @@ def _check_anomalies(result: dict) -> list:
     return issues
 
 
+# ── Data-coverage helpers ─────────────────────────────────────────────────────
+
+# All live dicts merged for easy lookup
+_ALL_TRAINER_LIVE = {**_TRAINER_DATA_FLAT, **_TRAINER_DATA_NH,
+                     **_UK_TRAINER_DATA_FLAT, **_UK_TRAINER_DATA_NH}
+_ALL_JOCKEY_LIVE  = {**_JOCKEY_DATA_FLAT, **_JOCKEY_DATA_NH,
+                     **_UK_JOCKEY_DATA_FLAT, **_UK_JOCKEY_DATA_NH}
+_ALL_HORSE_RATINGS_LIVE = {**_HORSE_RATINGS_FLAT, **_HORSE_RATINGS_NH,
+                            **_UK_HORSE_RATINGS_FLAT, **_UK_HORSE_RATINGS_NH}
+_ALL_HORSE_STATS_LIVE   = {**_HORSE_STATS_FLAT, **_HORSE_STATS_NH,
+                            **_UK_HORSE_STATS_FLAT, **_UK_HORSE_STATS_NH}
+
+# Fallback-only sets (names that would have been found even before the fix)
+_FALLBACK_TRAINER_NAMES = {_normalize_name(n) for n in _UK_TRAINER_FALLBACK}
+_FALLBACK_JOCKEY_NAMES  = {_normalize_name(n) for n in _UK_JOCKEY_FALLBACK}
+
+
+def _data_hits(runner_raw: dict) -> dict:
+    """Return per-runner data-source hit flags."""
+    tname = _normalize_name(runner_raw.get("trainer", ""))
+    jname = _normalize_name(runner_raw.get("jockey",  ""))
+    hname = _normalize_name(runner_raw.get("name",    ""))
+    return {
+        "trainer_live": tname in _ALL_TRAINER_LIVE,
+        "trainer_fallback_only": (tname in _FALLBACK_TRAINER_NAMES
+                                  and tname not in _ALL_TRAINER_LIVE),
+        "jockey_live":  jname in _ALL_JOCKEY_LIVE,
+        "jockey_fallback_only": (jname in _FALLBACK_JOCKEY_NAMES
+                                 and jname not in _ALL_JOCKEY_LIVE),
+        "horse_ratings": hname in _ALL_HORSE_RATINGS_LIVE,
+        "horse_stats":   hname in _ALL_HORSE_STATS_LIVE,
+    }
+
+
 # ── Main simulation ───────────────────────────────────────────────────────────
 
 def run_simulation(n: int = 100):
@@ -517,6 +565,15 @@ def run_simulation(n: int = 100):
     field_issues   = []
     pipeline_diffs = []
 
+    # ── Data-coverage counters ──
+    total_runners          = 0
+    trainer_live_hits      = 0   # trainer found in live historical data
+    jockey_live_hits       = 0   # jockey found in live historical data
+    horse_ratings_hits     = 0   # horse found in live ratings files
+    horse_stats_hits       = 0   # horse found in live stats files
+    any_live_hit_runners   = 0   # runners with at least one live-data hit
+    connections_values     = []  # all connections multipliers (for distribution)
+
     # Track per-race for CSV-style summary
     race_rows = []
 
@@ -543,9 +600,24 @@ def run_simulation(n: int = 100):
                     f"expected {len(gen.manual_runners)}"
                 )
 
-            # Audit fields for each runner
+            # Audit fields for each runner + count data hits
             runners_raw = paste_out["runners_raw"]
+            full_rankings = paste_result.get("full_rankings", [])
+            conn_by_name  = {r["name"]: r.get("connections", 1.0) for r in full_rankings}
+
             for i, raw in enumerate(runners_raw):
+                total_runners += 1
+                hits = _data_hits(raw)
+                if hits["trainer_live"]:  trainer_live_hits  += 1
+                if hits["jockey_live"]:   jockey_live_hits   += 1
+                if hits["horse_ratings"]: horse_ratings_hits += 1
+                if hits["horse_stats"]:   horse_stats_hits   += 1
+                if any(hits[k] for k in ("trainer_live", "jockey_live",
+                                         "horse_ratings", "horse_stats")):
+                    any_live_hit_runners += 1
+                conn = conn_by_name.get(raw["name"], 1.0)
+                connections_values.append(conn)
+
                 if i < len(gen.manual_runners):
                     issues = _audit_runner(raw, gen.manual_runners[i])
                     if issues:
@@ -683,6 +755,40 @@ def run_simulation(n: int = 100):
         print(f"  {'─'*40}")
         print(f"  Races with dark horse pick : {dark_horse_count:>3} / {dark_horse_races}")
         print(f"  Dark horse hit rate        : {100*dark_horse_count/max(dark_horse_races,1):.1f}%")
+
+    if total_runners > 0:
+        import statistics
+        avg_conn = statistics.mean(connections_values)
+        med_conn = statistics.median(connections_values)
+        boosted  = sum(1 for c in connections_values if c > 1.0)
+        print(f"\n  {'─'*40}")
+        print(f"  HISTORICAL DATA COVERAGE  (live files)")
+        print(f"  {'─'*40}")
+        print(f"  Total runners processed    : {total_runners}")
+        print(f"  Trainer  live-data hits    : {trainer_live_hits:>4} / {total_runners}"
+              f"  ({100*trainer_live_hits/total_runners:.1f}%)")
+        print(f"  Jockey   live-data hits    : {jockey_live_hits:>4} / {total_runners}"
+              f"  ({100*jockey_live_hits/total_runners:.1f}%)")
+        print(f"  Horse ratings hits         : {horse_ratings_hits:>4} / {total_runners}"
+              f"  ({100*horse_ratings_hits/total_runners:.1f}%)")
+        print(f"  Horse stats hits           : {horse_stats_hits:>4} / {total_runners}"
+              f"  ({100*horse_stats_hits/total_runners:.1f}%)")
+        print(f"  Runners w/ any live hit    : {any_live_hit_runners:>4} / {total_runners}"
+              f"  ({100*any_live_hit_runners/total_runners:.1f}%)")
+        print(f"\n  Connections multiplier stats (all runners)")
+        print(f"    Avg  : {avg_conn:.4f}   Median : {med_conn:.4f}")
+        print(f"    >1.0 (any boost) : {boosted} / {total_runners}"
+              f"  ({100*boosted/total_runners:.1f}%)")
+        print(f"\n  BASELINE COMPARISON (v1 — empty dicts, fallbacks only)")
+        print(f"  ┌─────────────────────────────────────────────────┐")
+        print(f"  │ Metric                 Baseline v1   Live Data  │")
+        print(f"  │ Trainer live hits       0 / —          {trainer_live_hits:>4} runners│")
+        print(f"  │ Jockey  live hits       0 / —          {jockey_live_hits:>4} runners│")
+        print(f"  │ Horse ratings hits      0 / —          {horse_ratings_hits:>4} runners│")
+        print(f"  │ Horse stats hits        0 / —          {horse_stats_hits:>4} runners│")
+        print(f"  │ Runners with live boost 0%          {100*any_live_hit_runners/total_runners:>6.1f}%     │")
+        print(f"  │ Avg connections mult    1.0000       {avg_conn:.4f}     │")
+        print(f"  └─────────────────────────────────────────────────┘")
 
     if anomalies:
         print(f"\n  {'─'*40}")
