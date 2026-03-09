@@ -944,6 +944,68 @@ class RacingAICore:
             if max_dist >= race.distance_f:
                 mult *= 1.02   # has proven the stamina at this trip or further
 
+        # ── Jumping reliability signals (comment-based, Wet Jumps only) ───────
+        # Small adjustments based on analyst/racecard comment phrases that
+        # indicate how reliably the horse jumps.  Modest ±0.01–0.02 range.
+        _JUMP_NEG = (
+            "made mistakes",
+            "bad mistake",
+            "not fluent",
+            "sloppy",
+            "jumped left",
+            "jumped right",
+            "sketchy jumping",
+            "error-prone",
+            "clumsy",
+        )
+        _JUMP_POS = (
+            "jumped well",
+            "sound jumper",
+            "accurate at obstacles",
+            "fluent jumping",
+        )
+        cmt = (runner.comment or "").lower()
+        if cmt:
+            for phrase in _JUMP_NEG:
+                if phrase in cmt:
+                    mult *= 0.98   # unreliable jumper — extra risk on wet ground
+                    break
+            for phrase in _JUMP_POS:
+                if phrase in cmt:
+                    mult *= 1.015  # accurate jumper — small edge in testing conditions
+                    break
+
+        # ── Stamina / finishing-strength signals (comment-based, Wet Jumps) ───
+        # Extra weight on phrases indicating whether the horse keeps finding
+        # under pressure — a key trait in attritional, wet jump races.
+        _STAMINA_POS = (
+            "stayed on",
+            "kept on",
+            "stayed well",
+            "plugged on",
+            "finished strongly",
+            "kept on dourly",
+            "found plenty",
+        )
+        _STAMINA_NEG = (
+            "weakened approaching finish",  # check longer phrase first
+            "weakened",
+            "tired",
+            "emptied",
+            "folded quickly",
+            "faded",
+            "no extra",
+        )
+        if cmt:
+            for phrase in _STAMINA_POS:
+                if phrase in cmt:
+                    mult *= 1.015  # kept finding under pressure
+                    break
+            for phrase in _STAMINA_NEG:
+                if phrase in cmt:
+                    mult *= 0.98   # stopped quickly — risky in testing conditions
+                    break
+
         return mult
 
     # --------------------------------------------------------
