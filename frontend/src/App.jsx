@@ -120,7 +120,8 @@ const DEFAULT_RACE = {
   race_type: "flat",
   surface: "aw",
   distance_str: "1m",
-  going: "good",
+  going: "not_specified",
+  ground_bucket: null,
 };
 
 const DEFAULT_RUNNERS = [
@@ -189,12 +190,13 @@ export default function App() {
         // Odds come from ODDS: fields inside the pasted racecard text.
         payload = {
           race_info: {
-            course:    race.course || "Unknown",
-            country:   "UK",
-            race_type: race.race_type,
-            surface:   race.surface,
-            distance:  normalizeDistance(race.distance_str),
-            going:     race.going,
+            course:        race.course || "Unknown",
+            country:       "UK",
+            race_type:     race.race_type,
+            surface:       race.surface,
+            distance:      normalizeDistance(race.distance_str),
+            going:         race.going,
+            ground_bucket: race.ground_bucket || null,
           },
           racecard_text: pasteText,
           dark_horse_enabled: darkHorseEnabled,
@@ -203,12 +205,13 @@ export default function App() {
         // /analyze expects flat AnalyzeRequest
         // weight → "stone-lbs" string  |  distance → "1m4f" string
         payload = {
-          course:    race.course || "Unknown",
-          country:   "UK",
-          race_type: race.race_type,
-          surface:   race.surface,
-          distance:  normalizeDistance(race.distance_str),
-          going:     race.going,
+          course:        race.course || "Unknown",
+          country:       "UK",
+          race_type:     race.race_type,
+          surface:       race.surface,
+          distance:      normalizeDistance(race.distance_str),
+          going:         race.going,
+          ground_bucket: race.ground_bucket || null,
           runners: runners.map((r) => ({
             name:             r.name,
             age:              r.age || 4,

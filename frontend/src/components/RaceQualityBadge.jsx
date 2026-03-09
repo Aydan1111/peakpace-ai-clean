@@ -2,7 +2,7 @@ import { useState } from "react";
 
 const LEVEL_STYLE = {
   HIGH:   { badge: "bg-green-500/20 text-green-300 border-green-500/40",  dot: "bg-green-400" },
-  MEDIUM: { badge: "bg-yellow-500/20 text-yellow-300 border-yellow-500/40", dot: "bg-yellow-400" },
+  MEDIUM: { badge: "bg-gold/20 text-gold border-gold/40", dot: "bg-gold" },
   LOW:    { badge: "bg-red-500/20 text-red-300 border-red-500/40",         dot: "bg-red-400" },
 };
 

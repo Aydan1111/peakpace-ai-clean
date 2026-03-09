@@ -55,11 +55,18 @@ def parse_distance_to_furlongs(distance_str: str) -> int:
 
 
 def normalize_going(going: str) -> str:
+    """Validate and normalise a going string.
+
+    Accepts all standard going values plus "not_specified" (and empty string),
+    which are treated as 'no detailed going available' and stored as "".
+    """
+    g = going.lower().strip()
+    if g in ("not_specified", ""):
+        return ""
     allowed = [
         "heavy", "soft", "good to soft", "good",
         "good to firm", "firm", "standard",
     ]
-    g = going.lower().strip()
     if g not in allowed:
         raise HTTPException(status_code=400, detail=f"Invalid going condition: {going}")
     return g

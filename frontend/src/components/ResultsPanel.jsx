@@ -2,9 +2,9 @@ const PICK_CONFIG = {
   GOLD: {
     emoji: "\u{1F947}",
     label: "Gold Pick",
-    border: "border-yellow-500/60",
-    bg: "bg-yellow-500/10",
-    text: "text-yellow-400",
+    border: "border-gold/60",
+    bg: "bg-gold/10",
+    text: "text-gold",
   },
   SILVER: {
     emoji: "\u{1F948}",
@@ -59,7 +59,7 @@ export default function ResultsPanel({ result }) {
   const confStyle = raceConf === "HIGH"
     ? "bg-green-500/20 text-green-300 border-green-500/40"
     : raceConf === "MEDIUM"
-    ? "bg-yellow-500/20 text-yellow-300 border-yellow-500/40"
+    ? "bg-gold/20 text-gold border-gold/40"
     : "bg-gray-500/20 text-gray-300 border-gray-500/40";
 
   return (
@@ -104,7 +104,7 @@ export default function ResultsPanel({ result }) {
               {p.market_flag && (
                 <p className={`text-xs mt-1 font-medium ${
                   p.market_flag === "market_confirms" ? "text-green-400"
-                  : p.market_flag === "market_near_agreement" ? "text-yellow-400"
+                  : p.market_flag === "market_near_agreement" ? "text-gold"
                   : "text-red-400"
                 }`}>
                   {p.market_flag === "market_confirms" && "Market agrees"}
@@ -191,7 +191,7 @@ function AlignmentBadge({ value }) {
   const v = Math.round(value);
   let color = "text-text-dim";
   if (v >= 85) color = "text-green-400";
-  else if (v >= 78) color = "text-yellow-400";
+  else if (v >= 78) color = "text-gold";
 
   return (
     <span className={`font-mono font-semibold ${color}`}>{v}%</span>

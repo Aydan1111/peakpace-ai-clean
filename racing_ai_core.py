@@ -1180,7 +1180,8 @@ class RacingAICore:
                     delta -= 0.015   # significant step up/down in trip
 
         # ── B. Going preference ──────────────────────────────────────────────
-        if prev:
+        # Skipped when going is blank ("not_specified") — no signal to use.
+        if prev and race.going:
             curr_bucket = _going_bucket(race.going)
             same = [p for p in prev
                     if _going_bucket(p.get("going", "")) == curr_bucket
