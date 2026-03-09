@@ -15,7 +15,7 @@ const GOING_OPTIONS = [
 // When Going is "Not Specified", Auto leaves ground_bucket unknown; user can
 // manually choose Wet or Dry to still provide ground context.
 const GROUND_BUCKET_OPTIONS = [
-  { value: "", label: "Auto" },
+  { value: "", label: "Auto (from Going/Ground)" },
   { value: "Wet", label: "Wet" },
   { value: "Dry", label: "Dry" },
 ];
