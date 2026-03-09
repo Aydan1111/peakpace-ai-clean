@@ -25,6 +25,7 @@ class RaceInfo:
     runners: int
     discipline: str = "Unknown"           # "Flat" | "Jumps" | "Unknown"
     discipline_subtype: Optional[str] = None  # "Hurdle" | "Chase" | "NH Flat" | None
+    ground_bucket: Optional[str] = None  # "Wet" | "Dry" | None (simple 2-way classification)
 
 
 @dataclass
@@ -252,6 +253,55 @@ def _going_bucket(going: str) -> str:
     if any(x in g for x in ("firm", "standard", "fast", "hard")):
         return "firm"
     return "good"
+
+
+# ── Wet / Dry ground classification (simple 2-way layer) ─────────────────────
+# This is an additional abstraction alongside the detailed going labels.
+# It does NOT replace the detailed labels — it is used only for the Wet Jumps
+# mode and can be populated from three sources (in priority order):
+#   1. Explicit paste-text GROUND: Wet / GROUND: Dry field
+#   2. Explicit manual-entry ground_bucket selection
+#   3. Inferred from the detailed going string via classify_wet_dry()
+
+def classify_wet_dry(going: str) -> Optional[str]:
+    """Infer a simple Wet/Dry bucket from a detailed going string.
+
+    Returns 'Wet', 'Dry', or None when going is empty/unknown.
+    The detailed going labels are never modified — this is a separate layer.
+
+    Ordered longest-first so compound phrases like "good to yielding" are
+    matched before bare "yielding", preventing false Wet classification.
+    """
+    if not going:
+        return None
+    g = going.lower().strip()
+    # Compound phrases that contain a wet keyword but are actually Dry/borderline
+    # must be checked FIRST before the bare wet keywords below.
+    _DRY_COMPOUNDS = (
+        "good to yielding",   # Ireland — borderline but treated as Dry
+        "good to soft",       # borderline — _TESTING_GOING handles penalty separately
+    )
+    for phrase in _DRY_COMPOUNDS:
+        if phrase in g:
+            return "Dry"
+    # All clearly testing/wet conditions map to Wet
+    if any(k in g for k in (
+        "heavy", "soft", "yielding", "very soft", "sloppy", "testing"
+    )):
+        return "Wet"
+    # All other recognisable conditions (firm, good, standard, etc.) → Dry
+    return "Dry"
+
+
+def _is_wet_jumps(race: RaceInfo) -> bool:
+    """Return True when Wet Jumps mode should activate.
+
+    Conditions: discipline is Jumps AND ground_bucket is Wet.
+    The ground_bucket field is set by the caller (main.py) using the
+    3-way priority logic: paste override → manual override → inferred.
+    """
+    is_jumps = race.discipline == "Jumps" or _is_nh(race.race_type)
+    return is_jumps and race.ground_bucket == "Wet"
 
 
 # ============================================================
@@ -778,14 +828,20 @@ class RacingAICore:
     # GOING / GROUND CONFIDENCE PENALTY
     # --------------------------------------------------------
     def _going_penalty(self, runner: Runner, going: str,
-                       race_type: str = "", country: str = "") -> int:
+                       race_type: str = "", country: str = "",
+                       wet_jumps: bool = False) -> int:
         """Confidence deduction when going is testing (soft/heavy/good-to-soft).
 
         Also applies a small score reduction in the caller.
-        Deductions (max combined 5):
+        Deductions (max combined 5, or 3 in Wet Jumps mode):
           +2  horse has fewer than 10 career runs (inexperience on testing ground)
                OR has no historical stats at all
           +3  horse carries more than 135 lbs net (heavy burden harder on soft)
+
+        In Wet Jumps mode the cap is reduced from 5 → 3.  We already know the
+        race is on testing ground, so the generic "uncertainty" penalty is less
+        appropriate; the model instead uses the wet-ground scoring layer to
+        identify which runners are better suited to the conditions.
         """
         if going.lower().strip() not in _TESTING_GOING:
             return 0
@@ -812,7 +868,83 @@ class RacingAICore:
         if net_weight > 135:
             penalty += 3
 
-        return min(penalty, 5)
+        # In Wet Jumps mode the base uncertainty penalty is softened — the
+        # wet-ground scoring layer handles differentiation between runners.
+        cap = 3 if wet_jumps else 5
+        return min(penalty, cap)
+
+    # --------------------------------------------------------
+    # WET JUMPS MODE — contextual score adjustment
+    # --------------------------------------------------------
+    def _wet_jumps_adjustment(self, runner: Runner, race: RaceInfo) -> float:
+        """Score multiplier applied only in Wet Jumps mode.
+
+        Modestly re-weights runners based on evidence relevant to wet,
+        attritional jumps races.  The adjustment is deliberately modest —
+        it shifts the model's ranking rather than overriding it.
+
+        Factors boosted (centred on 1.0 × multiplier):
+          • Proven wet-ground finishing record in previous runs
+          • High completion reliability (few falls/PUs/unseated in form)
+          • Stamina evidence (has run at current trip or further before)
+
+        Factors reduced:
+          • No wet-ground history at all (genuine unknown in testing conditions)
+          • Poor completion rate (worrying for attritional ground)
+
+        Returns a float multiplier (typically 0.96 – 1.05).
+        """
+        prev = runner.previous_runs or []
+        mult = 1.0
+
+        # ── Wet-ground evidence from previous runs ───────────────────────────
+        wet_runs = [
+            p for p in prev
+            if _going_bucket(p.get("going", "")) == "soft"
+            and isinstance(p.get("pos"), int)
+            and isinstance(p.get("field_size"), int)
+            and p["field_size"] > 1
+        ]
+        if len(wet_runs) >= 2:
+            avg_rel = statistics.mean(
+                p["pos"] / p["field_size"] for p in wet_runs
+            )
+            if avg_rel <= 0.30:
+                mult *= 1.04   # solid wet-ground performer
+            elif avg_rel <= 0.50:
+                mult *= 1.02   # above average on wet ground
+            elif avg_rel >= 0.70:
+                mult *= 0.97   # consistently poor on wet ground
+        elif len(wet_runs) == 0 and len(prev) >= 3:
+            # Has enough runs but none on wet going — genuine unknown
+            mult *= 0.97
+
+        # ── Completion reliability ────────────────────────────────────────────
+        # Falls / PUs / Unseated / Refused are bad signals in testing conditions
+        if runner.form:
+            digits      = sum(1 for c in runner.form if c.isdigit())
+            non_finish  = sum(1 for c in runner.form.upper()
+                              if c in ("F", "P", "U", "R"))
+            total = digits + non_finish
+            if total >= 4:
+                finish_rate = digits / total
+                if finish_rate >= 0.85:
+                    mult *= 1.02   # very reliable finisher
+                elif finish_rate <= 0.50:
+                    mult *= 0.97   # frequent non-finisher — risky on testing ground
+
+        # ── Stamina evidence ─────────────────────────────────────────────────
+        # Proven at the current trip or further → modest uplift
+        if prev and race.distance_f > 0:
+            max_dist = max(
+                (p.get("distance_f", 0) for p in prev
+                 if isinstance(p.get("distance_f"), (int, float))),
+                default=0,
+            )
+            if max_dist >= race.distance_f:
+                mult *= 1.02   # has proven the stamina at this trip or further
+
+        return mult
 
     # --------------------------------------------------------
     # RAW RATING LOOKUP (for field-context calculation)
@@ -1298,8 +1430,13 @@ class RacingAICore:
             if odds_mult != 1.0:
                 final_score *= odds_mult
 
+            # ── Wet Jumps mode: apply contextual score adjustment ─────────────
+            wet_jumps = _is_wet_jumps(race)
+            if wet_jumps:
+                final_score *= self._wet_jumps_adjustment(r, race)
+
             going_pen = self._going_penalty(r, race.going, race.race_type,
-                                            race.country)
+                                            race.country, wet_jumps=wet_jumps)
             # Score reduction for testing ground: 1% per penalty point,
             # floor at 0.95 (~5% max reduction on score).
             if going_pen > 0:

@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional, Dict
 import re
-from racing_ai_core import RacingAICore, RaceInfo, Runner
+from racing_ai_core import RacingAICore, RaceInfo, Runner, classify_wet_dry
 
 app = FastAPI(title="PeakPace AI")
 
@@ -93,6 +93,7 @@ class AnalyzeRequest(BaseModel):
     runners: List[RunnerInput]
     odds: Optional[Dict[str, str]] = None
     dark_horse_enabled: bool = False
+    ground_bucket: Optional[str] = None  # "Wet" | "Dry" | None — explicit override
 
 
 class TextRaceInput(BaseModel):
@@ -102,6 +103,7 @@ class TextRaceInput(BaseModel):
     surface: str = "aw"
     distance: str = "8f"
     going: str = "good"
+    ground_bucket: Optional[str] = None  # "Wet" | "Dry" | None — explicit override
 
 
 class AnalyzeTextRequest(BaseModel):
@@ -119,6 +121,7 @@ class RaceQualityRequest(BaseModel):
     distance: str = "8f"
     going: str = "good"
     runners: List[RunnerInput]
+    ground_bucket: Optional[str] = None  # "Wet" | "Dry" | None — explicit override
 
 
 class RaceQualityTextRequest(BaseModel):
@@ -146,8 +149,9 @@ _UK_COURSES = frozenset({
 })
 
 # Structured header line:  COURSE: Newcastle  /  DISTANCE: 6f  / …
+# GROUND: Wet | GROUND: Dry is also supported as an explicit override.
 _HEADER_STRUCTURED_RE = re.compile(
-    r"^(COURSE|DISTANCE|RUNNERS?|CLASS|TYPE|RACE(?:[\s_]NAME)?|GOING)\s*:\s*(.+)",
+    r"^(COURSE|DISTANCE|RUNNERS?|CLASS|TYPE|RACE(?:[\s_]NAME)?|GOING|GROUND)\s*:\s*(.+)",
     re.I,
 )
 
@@ -244,12 +248,13 @@ def parse_racecard_header(text: str) -> dict:
     """
     header = _extract_header_section(text)
     result: dict = {
-        "course":     None,
-        "race_name":  None,
-        "distance":   None,
-        "field_size": None,
-        "race_class": None,
-        "race_type":  None,   # meeting type: Handicap / Maiden / etc.
+        "course":        None,
+        "race_name":     None,
+        "distance":      None,
+        "field_size":    None,
+        "race_class":    None,
+        "race_type":     None,   # meeting type: Handicap / Maiden / etc.
+        "ground_bucket": None,   # "Wet" | "Dry" | None — from explicit GROUND: field
     }
     if not header:
         return result
@@ -275,6 +280,11 @@ def parse_racecard_header(text: str) -> dict:
             result["race_name"] = val
         elif key == "type":
             result["race_type"] = val
+        elif key == "ground":
+            # Explicit GROUND: Wet / GROUND: Dry field
+            gb = val.strip().capitalize()
+            if gb in ("Wet", "Dry"):
+                result["ground_bucket"] = gb
 
     # ── Pass 2: unstructured patterns on any non-structured line ─────────────
     all_known_courses = _IRISH_COURSES | _UK_COURSES
@@ -708,14 +718,28 @@ def analyze(request: AnalyzeRequest):
     if len(request.runners) < 2:
         raise HTTPException(status_code=400, detail="Need at least 2 runners.")
 
+    # Discipline is always known in manual mode — user explicitly chose race_type.
+    disc = _discipline_from_race_type(request.race_type)
+
+    # Ground bucket: explicit manual override, or inferred from going
+    going_normalised = normalize_going(request.going)
+    ground_bucket = _resolve_ground_bucket(
+        text_ground=None,
+        manual_ground=request.ground_bucket,
+        inferred_going=going_normalised,
+    )
+
     race = RaceInfo(
         course=request.course,
         country=request.country,
         race_type=request.race_type,
         surface=request.surface,
         distance_f=parse_distance_to_furlongs(request.distance),
-        going=normalize_going(request.going),
+        going=going_normalised,
         runners=len(request.runners),
+        discipline=disc["discipline"],
+        discipline_subtype=disc["subtype"],
+        ground_bucket=ground_bucket,
     )
 
     runner_objects = []
@@ -739,11 +763,11 @@ def analyze(request: AnalyzeRequest):
     engine.dark_horse_enabled = request.dark_horse_enabled
     result = engine.analyze(race, runner_objects, odds=request.odds)
 
-    # Discipline is always known in manual mode — user explicitly chose race_type.
-    disc = _discipline_from_race_type(request.race_type)
     result["discipline"]         = disc["discipline"]
     result["discipline_subtype"] = disc["subtype"]
     result["discipline_display"] = _discipline_display(disc["discipline"], disc["subtype"])
+    result["ground_bucket"]      = ground_bucket
+    result["wet_jumps_mode"]     = (disc["discipline"] == "Jumps" and ground_bucket == "Wet")
     return result
 
 
@@ -819,6 +843,44 @@ def detect_going(text: str) -> Optional[str]:
     return None
 
 
+# Matches an explicit "GROUND: Wet" or "GROUND: Dry" field anywhere in the text.
+_GROUND_BUCKET_RE = re.compile(r"^\s*GROUND\s*:\s*(Wet|Dry)\s*$", re.I | re.M)
+
+
+def detect_ground_bucket(text: str) -> Optional[str]:
+    """Return an explicit Wet/Dry ground bucket from pasted racecard text.
+
+    Only matches explicit ``GROUND: Wet`` or ``GROUND: Dry`` lines.
+    Returns None when the field is absent — the caller infers from going instead.
+    This never over-rides going detection; the two fields are independent.
+    """
+    m = _GROUND_BUCKET_RE.search(text)
+    if m:
+        return m.group(1).capitalize()
+    return None
+
+
+def _resolve_ground_bucket(
+    text_ground: Optional[str],   # from paste GROUND: field
+    manual_ground: Optional[str], # from manual-entry field
+    inferred_going: str,          # the going string to infer from as fallback
+) -> Optional[str]:
+    """Apply 3-way priority logic to resolve the final ground bucket.
+
+    Priority:
+      1. Explicit paste GROUND: Wet / GROUND: Dry  (highest)
+      2. Explicit manual-entry ground_bucket
+      3. Inferred from detailed going string
+    """
+    if text_ground is not None:
+        return text_ground
+    if manual_ground is not None:
+        gb = manual_ground.capitalize()
+        if gb in ("Wet", "Dry"):
+            return gb
+    return classify_wet_dry(inferred_going)
+
+
 # -------------------------------------------------
 # ANALYZE TEXT (PASTE MODE)
 # -------------------------------------------------
@@ -852,6 +914,13 @@ def analyze_text(request: AnalyzeTextRequest):
     distance_str = header_info["distance"] if header_info["distance"] is not None else ri.distance
     course_str   = header_info["course"]   if header_info["course"]   is not None else ri.course
 
+    # ── Ground bucket: 3-way priority (paste > manual > inferred from going) ──
+    ground_bucket = _resolve_ground_bucket(
+        text_ground=header_info.get("ground_bucket") or detect_ground_bucket(request.racecard_text),
+        manual_ground=ri.ground_bucket,
+        inferred_going=going_str,
+    )
+
     race = RaceInfo(
         course=course_str,
         country=detected_country,
@@ -862,6 +931,7 @@ def analyze_text(request: AnalyzeTextRequest):
         runners=len(runners),
         discipline=disc["discipline"],
         discipline_subtype=disc["subtype"],
+        ground_bucket=ground_bucket,
     )
 
     runner_objects = [
@@ -888,11 +958,13 @@ def analyze_text(request: AnalyzeTextRequest):
     engine.dark_horse_enabled = request.dark_horse_enabled
     result = engine.analyze(race, runner_objects, odds=final_odds)
 
-    # ── Attach header + discipline info to the response ───────────────────────
+    # ── Attach header + discipline + ground info to the response ─────────────
     result["race_header"]        = header_info
     result["discipline"]         = disc["discipline"]
     result["discipline_subtype"] = disc["subtype"]
     result["discipline_display"] = _discipline_display(disc["discipline"], disc["subtype"])
+    result["ground_bucket"]      = ground_bucket
+    result["wet_jumps_mode"]     = (disc["discipline"] == "Jumps" and ground_bucket == "Wet")
     return result
 
 
@@ -903,14 +975,21 @@ def analyze_text(request: AnalyzeTextRequest):
 @app.post("/race-quality")
 def race_quality(request: RaceQualityRequest):
     """Pre-analysis quality check for manually-entered runners."""
+    going_normalised = normalize_going(request.going)
+    ground_bucket = _resolve_ground_bucket(
+        text_ground=None,
+        manual_ground=request.ground_bucket,
+        inferred_going=going_normalised,
+    )
     race = RaceInfo(
         course=request.course,
         country=request.country,
         race_type=request.race_type,
         surface=request.surface,
         distance_f=parse_distance_to_furlongs(request.distance),
-        going=normalize_going(request.going),
+        going=going_normalised,
         runners=len(request.runners),
+        ground_bucket=ground_bucket,
     )
     runner_objects = []
     for r in request.runners:
@@ -952,6 +1031,12 @@ def race_quality_text(request: RaceQualityTextRequest):
     distance_str = header_info["distance"] if header_info["distance"] is not None else ri.distance
     course_str   = header_info["course"]   if header_info["course"]   is not None else ri.course
 
+    ground_bucket = _resolve_ground_bucket(
+        text_ground=header_info.get("ground_bucket") or detect_ground_bucket(request.racecard_text),
+        manual_ground=ri.ground_bucket,
+        inferred_going=going_str,
+    )
+
     race = RaceInfo(
         course=course_str,
         country=detected_country,
@@ -962,6 +1047,7 @@ def race_quality_text(request: RaceQualityTextRequest):
         runners=len(runners),
         discipline=disc["discipline"],
         discipline_subtype=disc["subtype"],
+        ground_bucket=ground_bucket,
     )
     runner_objects = [
         Runner(
@@ -980,6 +1066,7 @@ def race_quality_text(request: RaceQualityTextRequest):
     result["discipline"]         = disc["discipline"]
     result["discipline_subtype"] = disc["subtype"]
     result["discipline_display"] = _discipline_display(disc["discipline"], disc["subtype"])
+    result["ground_bucket"]      = ground_bucket
     return result
 
 
