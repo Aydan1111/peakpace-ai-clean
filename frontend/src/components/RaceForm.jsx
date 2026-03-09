@@ -1,5 +1,7 @@
-// Values must match backend normalize_going() exactly (lowercase, spaces not underscores)
+// Values must match backend normalize_going() exactly (lowercase, spaces not underscores).
+// "not_specified" is handled specially — backend treats it as no detailed going.
 const GOING_OPTIONS = [
+  { value: "not_specified", label: "Not Specified" },
   { value: "heavy", label: "Heavy" },
   { value: "soft", label: "Soft" },
   { value: "good to soft", label: "Good to Soft" },
@@ -9,9 +11,11 @@ const GOING_OPTIONS = [
   { value: "standard", label: "Standard" },
 ];
 
-// Simple 2-way ground bucket — optional, inferred from Going when left blank
+// Simple 2-way ground bucket — optional, inferred from Going when left blank.
+// When Going is "Not Specified", Auto leaves ground_bucket unknown; user can
+// manually choose Wet or Dry to still provide ground context.
 const GROUND_BUCKET_OPTIONS = [
-  { value: "", label: "Auto (infer from Going)" },
+  { value: "", label: "Auto" },
   { value: "Wet", label: "Wet" },
   { value: "Dry", label: "Dry" },
 ];
@@ -63,7 +67,7 @@ export default function RaceForm({ race, onChange }) {
           </select>
         </Field>
 
-        <Field label="Going">
+        <Field label="Going / Ground">
           <select
             value={race.going}
             onChange={(e) => set("going", e.target.value)}
@@ -77,7 +81,7 @@ export default function RaceForm({ race, onChange }) {
           </select>
         </Field>
 
-        <Field label="Ground (optional)">
+        <Field label="Ground Bucket">
           <select
             value={race.ground_bucket || ""}
             onChange={(e) => set("ground_bucket", e.target.value || null)}
