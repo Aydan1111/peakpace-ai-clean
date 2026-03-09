@@ -9,6 +9,13 @@ const GOING_OPTIONS = [
   { value: "standard", label: "Standard" },
 ];
 
+// Simple 2-way ground bucket — optional, inferred from Going when left blank
+const GROUND_BUCKET_OPTIONS = [
+  { value: "", label: "Auto (infer from Going)" },
+  { value: "Wet", label: "Wet" },
+  { value: "Dry", label: "Dry" },
+];
+
 const RACE_TYPE_OPTIONS = ["flat", "jumps"];
 const SURFACE_OPTIONS = [
   { value: "aw", label: "All Weather" },
@@ -63,6 +70,20 @@ export default function RaceForm({ race, onChange }) {
             className="input"
           >
             {GOING_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+        </Field>
+
+        <Field label="Ground (optional)">
+          <select
+            value={race.ground_bucket || ""}
+            onChange={(e) => set("ground_bucket", e.target.value || null)}
+            className="input"
+          >
+            {GROUND_BUCKET_OPTIONS.map((o) => (
               <option key={o.value} value={o.value}>
                 {o.label}
               </option>
