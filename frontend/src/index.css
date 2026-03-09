@@ -159,7 +159,7 @@ body {
 }
 
 .hero-title-ai {
-  color: #111111;
+  color: var(--color-text-dim);
   font-weight: 300;
 }
 
@@ -168,4 +168,25 @@ body {
   color: rgba(232, 232, 232, 0.65);
   margin: 0;
   letter-spacing: 0.02em;
+}
+
+/* ── Gold utility overrides — hardcoded #D4AF37, no yellow fallback ────── */
+@layer utilities {
+  .text-gold            { color: #D4AF37; }
+  .text-gold\/70        { color: rgba(212,175,55,0.70); }
+  .text-gold\/80        { color: rgba(212,175,55,0.80); }
+
+  .bg-gold              { background-color: #D4AF37; }
+  .bg-gold\/10          { background-color: rgba(212,175,55,0.10); }
+  .bg-gold\/20          { background-color: rgba(212,175,55,0.20); }
+
+  .border-gold          { border-color: #D4AF37; }
+  .border-t-gold        { border-top-color: #D4AF37; }
+  .border-gold\/30      { border-color: rgba(212,175,55,0.30); }
+  .border-gold\/40      { border-color: rgba(212,175,55,0.40); }
+  .border-gold\/60      { border-color: rgba(212,175,55,0.60); }
+
+  .hover\:text-gold:hover       { color: #D4AF37; }
+  .hover\:text-gold\/70:hover   { color: rgba(212,175,55,0.70); }
+  .hover\:border-gold\/40:hover { border-color: rgba(212,175,55,0.40); }
 }
