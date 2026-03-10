@@ -1679,15 +1679,50 @@ class RacingAICore:
             gold_sc = next((h["score"] for h in ranked
                             if h["name"] == gname), 0.0)
 
-            # Silver is always the highest-scoring non-gold runner (rank 2 by
-            # score), keeping it in sync with full_rankings order.
-            # A 80% floor is applied; if rank-2 is below it, fall back to
-            # pool[0] regardless (still rank-2 in the table).
+            # Hard cap: only ever consider the top-3 non-gold runners.
+            # This guarantees Silver never drifts deep into the field.
+            _SILVER_WINDOW = 3
+            candidates = pool[:_SILVER_WINDOW]
+
+            # Score floor: genuine contenders score ≥ 80 % of Gold.
+            # If nothing clears the bar, fall back to rank-2 (candidates[0]).
             contenders = [
-                h for h in pool
+                h for h in candidates
                 if gold_sc == 0.0 or h["score"] / gold_sc >= _SILVER_MIN_RATIO
             ]
-            return contenders[0] if contenders else pool[0]
+            if not contenders:
+                return candidates[0]
+            if len(contenders) == 1:
+                return contenders[0]
+
+            # Tiebreak within contenders using lightweight supporting signals.
+            # Score is already the primary ordering; these adjustments only
+            # flip the choice when horses are genuinely close.
+            #   (a) Extreme-outsider soft penalty (≥ 66/1): realistic supporting
+            #       picks should have at least some market backing.
+            #   (b) Wet-Jumps completion bonus: reward reliable finishers in
+            #       attritional conditions — meaningful only when wet_jumps=True.
+            _rmap = {r.name: r for r in runners}
+
+            def _silver_score(h):
+                s = h["score"]
+                # (a) soft discount for genuine extreme outsiders
+                dec = _odds_decimal.get(_normalize_name(h["name"]))
+                if dec is not None and dec >= _EXTREME_ODDS_DEC:
+                    s *= 0.92
+                # (b) wet-jumps completion rate bonus (range ±4 %)
+                if wet_jumps:
+                    r = _rmap.get(h["name"])
+                    if r and r.form:
+                        digits = sum(1 for c in r.form if c.isdigit())
+                        total  = digits + sum(
+                            1 for c in r.form.upper() if c in "FPRU")
+                        completion = digits / total if total > 0 else 0.5
+                        s *= (0.96 + 0.08 * completion)
+                return s
+
+            contenders.sort(key=_silver_score, reverse=True)
+            return contenders[0]
 
         gold_entry   = _select_gold(scored)
         gold_name    = gold_entry["name"] if gold_entry else None
