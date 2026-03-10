@@ -1688,12 +1688,17 @@ class RacingAICore:
                 return pool[0]   # graceful fallback: raw rank-2
 
             # Prefer market-backed candidates (≤ 33/1).
-            # Horses with no odds data are treated as eligible.
-            market_backed = [
-                h for h in contenders
-                if (_normalize_name(h["name"]) not in _odds_decimal
-                    or _odds_decimal[_normalize_name(h["name"])] < _SILVER_ODDS_CAP)
-            ]
+            # When field-wide odds are present, horses not found in the odds
+            # dict are treated as uncertain (not auto-eligible).  When no
+            # odds data exists at all, all contenders are eligible.
+            if _odds_decimal:
+                market_backed = [
+                    h for h in contenders
+                    if _odds_decimal.get(_normalize_name(h["name"]),
+                                        _SILVER_ODDS_CAP) < _SILVER_ODDS_CAP
+                ]
+            else:
+                market_backed = list(contenders)
             silver_pool = market_backed if market_backed else contenders
 
             # Wet Jumps tiebreak: among horses within 2 % of the top

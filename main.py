@@ -489,8 +489,16 @@ _DISCIPLINE_RE = re.compile(
 )
 
 # Splits runs concatenated on a single line by date boundaries.
-# e.g. "Jan 9 2026 | Naas | ... | Chase Dec 13 2025 | ..." → two segments.
-_DATE_BOUNDARY_RE = re.compile(r"\b[A-Za-z]{3}\s+\d{1,2}\s+\d{4}\b")
+# Handles both "Jan 9 2026" (month-first) and "17 Jan 26" (day-first, canonical).
+_DATE_BOUNDARY_RE = re.compile(
+    r"\b(?:[A-Za-z]{3}\s+\d{1,2}|\d{1,2}\s+[A-Za-z]{3})\s+\d{2,4}\b"
+)
+
+# Matches the start of a previous-run line in either date order.
+_DATE_LINE_RE = re.compile(
+    r"^(?:[A-Za-z]{3}\s+\d{1,2}|\d{1,2}\s+[A-Za-z]{3})\s+\d{2,4}",
+    re.I,
+)
 
 
 def _split_run_segments(text: str) -> list:
@@ -521,8 +529,10 @@ def _parse_prev_run_line(line: str) -> Optional[dict]:
     Returns a dict with going, distance_f, pos, field_size, discipline,
     or None if the line does not look like a previous run record.
     """
-    # Must start with a date-like token
-    if not re.match(r"\w{3}\s+\d{1,2}\s+\d{2,4}", line.strip(), re.I):
+    # Must start with a date-like token in either order:
+    #   "Jan 9 26" / "Jan 9 2026"  (month first)
+    #   "17 Jan 26" / "17 Jan 2026" (day first — canonical format)
+    if not _DATE_LINE_RE.match(line.strip()):
         return None
 
     # Split on em-dash / en-dash / spaced hyphen / pipe (|)
@@ -534,6 +544,10 @@ def _parse_prev_run_line(line: str) -> Optional[dict]:
     for part in parts:
         part = part.strip()
         if not part:
+            continue
+
+        # N/A finish (fell, brought down, pulled up, etc.) — skip gracefully
+        if re.match(r"^n/?a$", part, re.I):
             continue
 
         # pos/field_size  e.g. "7/7"  "6/13"
@@ -561,7 +575,10 @@ def _parse_prev_run_line(line: str) -> Optional[dict]:
             result["going"] = gm.group(1).lower()
             continue
 
-    if "pos" in result and "field_size" in result:
+    # Return if at least one useful signal was extracted.
+    # pos+field_size may be absent for N/A finishes (falls etc.);
+    # going and distance_f are still valuable for suitability scoring.
+    if "going" in result or "distance_f" in result or "pos" in result:
         return result
     return None
 
