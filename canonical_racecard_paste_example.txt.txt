@@ -1,0 +1,218 @@
+COURSE: Cheltenham
+RACE: Sky Bet Supreme Novices' Hurdle
+TYPE: Jumps
+DISTANCE: 2m
+RUNNERS: 12
+CLASS: Class 1
+GOING / GROUND: Good to Soft
+GROUND: Dry
+
+HORSE: Old Park Star
+JOCKEY: Nico De Boinville
+TRAINER: Nicky Henderson
+FORM: 323-111
+AGE: 6
+WEIGHT: 11-7
+ODDS: 2/1
+
+COMMENT:
+Failed to win 3 bumpers for Paul Nicholls last season but has created a first-rate impression when winning all 3 hurdle starts for Nicky Henderson. Powered 18 lengths clear in Haydock Grade 2 last time and he'll be hard to beat with further progress likely.
+
+RECENT RUNS:
+17 Jan 26 | Haydock Park | 1m 7f 144y | Good Soft | 1/6 | Hurdle
+12 Dec 25 | Cheltenham | 2m 179y | Good Soft | 1/10 | Hurdle
+24 Nov 25 | Kempton Park | 2m | Good Soft | 1/6 | Hurdle
+21 Apr 25 | Chepstow | 2m 11y | Good Firm | 3/9 | Bumper
+7 Feb 25 | Kempton Park | 2m | Soft | 2/8 | Bumper
+
+HORSE: Talk The Talk
+JOCKEY: J. J. Slevin
+TRAINER: Joseph Patrick O'Brien
+FORM: 2-11F1
+AGE: 5
+WEIGHT: 11-7
+ODDS: 4/1
+
+COMMENT:
+Likely would have been unbeaten over hurdles but for coming down at the last in Leopardstown Grade 1 over Christmas. Gained compensation for that when edging out Ballyfad in another Grade 1 there at the Dublin Racing Festival. Should go well.
+
+RECENT RUNS:
+1 Feb 26 | Leopardstown | 2m | Heavy | 1/12 | Hurdle
+27 Dec 25 | Leopardstown | 2m | Good | N/A | Hurdle
+29 Nov 25 | Fairyhouse | 2m | Soft | 1/6 | Hurdle
+18 Oct 25 | Limerick | 2m 70y | Good Soft | 1/16 | Hurdle
+22 Mar 25 | Newbury | 2m 69y | Good | 2/11 | Bumper
+
+HORSE: Mighty Park
+JOCKEY: M. P. Walsh
+TRAINER: W. P. Mullins
+FORM: 1
+AGE: 5
+WEIGHT: 11-7
+ODDS: 5/1
+
+COMMENT:
+Closely related to King George VI Chase winner/Cheltenham Gold Cup runner-up Might Bite. Second in sole point last spring and made a striking winning start to his hurdle career when making all by a wide margin at Fairyhouse in January, jumping accurately and in command a long way out. Top prospect.
+
+RECENT RUNS:
+15 Jan 26 | Fairyhouse | 2m | Heavy | 1/16 | Hurdle
+
+HORSE: Mydaddypaddy
+JOCKEY: Harry Skelton
+TRAINER: Dan Skelton
+FORM: 1-112
+AGE: 5
+WEIGHT: 11-7
+ODDS: 6/1
+
+COMMENT:
+Easy bumper win last March and once again looked an exciting prospect when landing his first 2 hurdles. Beaten by Idaho Sun when odds on for Grade 1 Formby at Aintree over Christmas but this fluent jumper likely wasn't helped by the removal of the hurdles in the straight. Remains capable of better.
+
+RECENT RUNS:
+26 Dec 25 | Aintree | 2m 209y | Good | 2/6 | Hurdle
+3 Dec 25 | Haydock Park | 1m 7f 144y | Good | 1/3 | Hurdle
+10 Nov 25 | Carlisle | 2m 1f | Soft | 1/7 | Hurdle
+2 Mar 25 | Huntingdon | 1m 7f 171y | Good Soft | 1/14 | Bumper
+
+HORSE: El Cairos
+JOCKEY: J. W. Kennedy
+TRAINER: Gordon Elliott
+FORM: 15-2F1
+AGE: 6
+WEIGHT: 11-7
+ODDS: 13/2
+
+COMMENT:
+Smart in bumpers for Gary & Josh Moore and would have made impressive winning start over hurdles but for stumbling and falling after the last at Leopardstown over Christmas. Survived a bad mistake at the last to win a maiden at Thurles 5 weeks later. Has the potential for considerable improvement.
+
+RECENT RUNS:
+29 Jan 26 | Thurles | 1m 7f 179y | Heavy | 1/18 | Hurdle
+26 Dec 25 | Leopardstown | 2m | Good | N/A | Hurdle
+1 May 25 | Punchestown | 2m 94y | Good Soft | 2/12 | Bumper
+12 Mar 25 | Cheltenham | 2m 87y | Good Soft | 5/17 | Bumper
+7 Nov 24 | Newbury | 2m 69y | Good Soft | 1/6 | Bumper
+
+HORSE: Leader Dallier
+JOCKEY: P. Townend
+TRAINER: W. P. Mullins
+FORM: 611-11121
+AGE: 5
+WEIGHT: 11-7
+ODDS: 9/1
+EQUIPMENT: Tongue Strap
+
+COMMENT:
+Multiple bumper winner in France for Mathieu Pitart. Promising second in Leopardstown maiden on hurdle debut having joined Willie Mullins and easily landed short odds at Punchestown (2m, heavy) since. Potentially smart.
+
+RECENT RUNS:
+26 Jan 26 | Punchestown | 2m | Heavy | 1/14 | Hurdle
+26 Dec 25 | Leopardstown | 2m | Good | 2/21 | Hurdle
+16 Jul 25 | Vichy | 1m 3f 205y | Good | 1/11 | Bumper
+25 May 25 | Vichy | 1m 4f 203y | Good | 1/8 | Bumper
+1 May 25 | Wissembourg | 1m 6f 201y | Good Firm | 1/6 | Bumper
+
+HORSE: Sober Glory
+JOCKEY: Ben Jones
+TRAINER: Philip Hobbs & Johnson White
+FORM: 111-1411
+AGE: 6
+WEIGHT: 11-7
+ODDS: 10/1
+
+COMMENT:
+Made it 6 wins from only 7 starts under Rules with another dominant display from the front at Newbury (2m, soft) 31 days ago. This is a rise in class but he almost certainly has bigger performances in him.
+
+RECENT RUNS:
+7 Feb 26 | Newbury | 2m 69y | Soft | 1/8 | Hurdle
+14 Jan 26 | Newbury | 2m 69y | Good Soft | 1/11 | Hurdle
+6 Dec 25 | Sandown Park | 1m 7f 216y | Soft | 4/5 | Hurdle
+5 Nov 25 | Chepstow | 2m 16y | Soft | 1/13 | Hurdle
+8 Feb 25 | Newbury | 2m 69y | Soft | 1/11 | Bumper
+
+HORSE: Baron Noir
+JOCKEY: Tom Bellamy
+TRAINER: Alan King
+FORM: 38/13-1211
+AGE: 6
+WEIGHT: 11-7
+ODDS: 33/1
+
+COMMENT:
+Dual bumper scorer who has taken very well to hurdling, producing a taking effort when adding to December's Uttoxeter maiden success with a defeat of a useful rival (pair clear) in 2m Kempton novice (good) in January. Definitely more to come but this is a significant step up in class.
+
+RECENT RUNS:
+10 Jan 26 | Kempton Park | 2m | Good | 1/7 | Hurdle
+9 Dec 25 | Uttoxeter | 1m 7f 168y | Heavy | 1/10 | Hurdle
+20 Nov 25 | Warwick | 2m | Good Soft | 2/13 | Hurdle
+1 May 25 | Punchestown | 2m 94y | Good Soft | 1/12 | Bumper
+8 Feb 25 | Newbury | 2m 69y | Soft | 3/11 | Bumper
+
+HORSE: Too Bossy For Us
+JOCKEY: Harry Cobden
+TRAINER: W. P. Mullins
+FORM: 7-51
+AGE: 5
+WEIGHT: 11-7
+ODDS: 33/1
+EQUIPMENT: Tongue Strap
+
+COMMENT:
+Made his hurdle debut in the Triumph at this meeting last year, finishing seventh. Useful form in defeat on the Flat later in 2025 and made a successful return to hurdling in maiden company at Punchestown (2m, heavy) last month. Plenty more will be needed here, though.
+
+RECENT RUNS:
+4 Feb 26 | Punchestown | 2m | Heavy | 1/15 | Hurdle
+28 Sept 25 | Curragh | 2m 80y | Soft | 24/30 | Flat
+13 Sept 25 | Leopardstown | 1m 5f | Good | 3/17 | Flat
+28 Jul 25 | Galway | 2m 179y | Good Soft | 12/20 | Flat
+29 Jun 25 | Curragh | 2m | Good | 2/25 | Flat
+
+HORSE: Koktail Brut
+JOCKEY: Danny Gilligan
+TRAINER: Gordon Elliott
+FORM: 443-51174
+AGE: 6
+WEIGHT: 11-7
+ODDS: 40/1
+
+COMMENT:
+Useful bumper winner and quickly reached a similar standard over hurdles, winning Punchestown maiden and Grade 2 Royal Bond at Fairyhouse in November. Better effort in 2m Grade 1 novices at Leopardstown since when 6½ lengths fourth to Talk The Talk last month. Jack Kennedy prefers El Cairos.
+
+RECENT RUNS:
+1 Feb 26 | Leopardstown | 2m | Heavy | 4/12 | Hurdle
+27 Dec 25 | Leopardstown | 2m | Good | 7/8 | Hurdle
+30 Nov 25 | Fairyhouse | 2m | Soft | 1/8 | Hurdle
+13 Nov 25 | Punchestown | 1m 7f 187y | Heavy | 1/21 | Hurdle
+1 May 25 | Punchestown | 2m 94y | Good Soft | 5/12 | Bumper
+
+HORSE: Eachtotheirown
+JOCKEY: Sean Flanagan
+TRAINER: Barry Connell
+FORM: 22-151
+AGE: 7
+WEIGHT: 11-7
+ODDS: 50/1
+
+COMMENT:
+Second in both bumpers and went one better in Galway maiden hurdle in October. Still looked in need of experience when well-held fifth in Royal Bond but resumed his progression with easy Thurles handicap win in January. This much harder but the yard has had a win and second in this in recent years.
+
+RECENT RUNS:
+18 Jan 26 | Thurles | 1m 7f 168y | Good Soft | 1/13 | Hurdle
+30 Nov 25 | Fairyhouse | 2m | Soft | 5/8 | Hurdle
+25 Oct 25 | Galway | 2m 90y | Good Soft | 1/15 | Hurdle
+22 Feb 25 | Fairyhouse | 2m | Soft | 2/10 | Bumper
+18 Jan 25 | Navan | 2m | Soft | 2/8 | Bumper
+
+HORSE: Sageborough
+JOCKEY: S. F. O'Keeffe
+TRAINER: Paul Nolan
+FORM: 17
+AGE: 5
+WEIGHT: 11-7
+ODDS: 80/1
+
+COMMENT:
+Made a winning debut in 14-runner maiden hurdle at Wexford in October but found the step up to Grade 2 company beyond him in the Royal Bond at Fairyhouse in November. Pitched in even deeper 100 days on. Outsider.
+
+RECENT RUNS:
+30 Nov 25 | Fairyhouse | 2m | Soft | 7/8 | Hurdle
+27 Oct 25 | Wexford | 2m 100y | Soft | 1/14 | Hurdle
