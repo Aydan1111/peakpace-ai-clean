@@ -1621,175 +1621,280 @@ class RacingAICore:
                 entry["_rating_edge"],
             )
 
-        # ── Tipster-grade pick selection ──────────────────────────────────────
+        # ── Tipster pick selection — redesigned (tipster_v2) ─────────────────
         #
-        # Gold  = best WIN candidate.
-        #   • Top-scoring qualified runner as before.
-        #   • One market-sanity bypass: when Gold is an extreme outsider
-        #     (66/1+) but rank-2 scores within 3 % of Gold AND has real
-        #     market support, rank-2 is the better win tip for a tipping
-        #     service.
+        # The three picks have DISTINCT selection criteria, not variants of
+        # the same score ranking.  Each selector has its own composite score
+        # built from different signals:
         #
-        # Silver = strongest non-Gold DANGER / place backup.
-        #   • Must be a genuine contender: score ≥ 80 % of Gold.
-        #     (Prevents a rank-10 horse becoming Silver merely because
-        #     ranks 2–9 all failed the data-quality bar.)
-        #   • Prefers market-supported candidates (≤ 33/1).
-        #   • Wet Jumps tiebreak: among close-scoring candidates, prefer
-        #     the more reliable finisher (form completion rate) — a key
-        #     trait in attritional, wet-ground races.
-        #   • Falls back to raw rank-2 when no contender clears the bar.
+        #   Gold   = Best WIN bet.
+        #     Composite: model_score × market_alignment × data_quality.
+        #     A horse that BOTH the model and market rate highly is a
+        #     more confident win tip than one the model alone ranks top.
         #
-        # Data-quality bar: prefer _conf_ded < 5 (unchanged from before).
-        _PICK_DED_LIMIT   = 5      # max acceptable data-quality penalty
-        _EXTREME_ODDS_DEC = 67.0   # 66/1+ in decimal = extreme outsider
-        _SILVER_MIN_RATIO = 0.80   # silver must score ≥ 80 % of gold
-        _SILVER_ODDS_CAP  = 35.0   # silver prefers ≤ 33/1 (35.0 decimal)
+        #   Silver = Main DANGER / biggest threat to Gold.
+        #     NOT rank-2 by score.  Composite: score_contention ×
+        #     market_proximity × profile_diversity.
+        #     Market proximity = how close is this horse to Gold in the
+        #     betting?  A horse at 4/1 when Gold is 2/1 is a genuine
+        #     danger.  A horse at 25/1 is not, regardless of model score.
+        #
+        #   Dark   = VALUE pick.
+        #     Core metric: value_ratio = model_implied_prob / market_implied_prob.
+        #     Finds the horse the market most underestimates relative to the
+        #     model.  Requires real odds; must score ≥ 55% of Gold; odds
+        #     5/1–50/1.  Not Gold or Silver.
+        #
+        # Each selector is a separate function with its own composite.
+        # Overlap prevention: Gold ≠ Silver ≠ Dark Horse always.
+        # ─────────────────────────────────────────────────────────────────────
+
+        _PICK_DED_LIMIT = 5   # max acceptable data-quality penalty
+
+        # Model implied probabilities — score-based, normalised across field.
+        # Used by Silver (market proximity) and Dark Horse (value_ratio).
+        _total_score = sum(h["score"] for h in scored if h["score"] > 0)
+        _model_prob: Dict[str, float] = {
+            h["name"]: (h["score"] / _total_score if _total_score > 0
+                        else 1.0 / max(len(scored), 1))
+            for h in scored
+        }
 
         def _qpool(ranked, exclude_names):
-            """Qualified pool: data-quality filtered, fallback to full."""
+            """Quality-filtered pool; falls back to full if all data is poor."""
             pool = [h for h in ranked if h["name"] not in exclude_names]
             q    = [h for h in pool if h["_conf_ded"] < _PICK_DED_LIMIT]
             return q if q else pool
+
+        # ── GOLD: Best win bet ─────────────────────────────────────────────────
+        # Composite = model_score × market_alignment × data_quality_factor.
+        # Gold rewards horses the model AND market both rate highly.
+        # A horse the model tops but the market prices as a big outsider is
+        # a weaker win tip than one both signals agree on.
+        def _gold_composite(h):
+            s = h["score"]
+
+            # Market alignment — use market_flag when present (set on top-2
+            # by the odds corroboration pass above), otherwise derive from
+            # the raw value ratio for the remaining horses.
+            flag = h.get("market_flag", "")
+            if flag == "market_confirms":
+                s *= 1.06
+            elif flag == "market_near_agreement":
+                s *= 1.02
+            elif flag == "model_vs_market":
+                dec = _odds_decimal.get(_normalize_name(h["name"]))
+                s  *= 0.93 if (dec is not None and dec > 20.0) else 0.97
+            else:
+                # For horses without a flag, compute from value_ratio.
+                dec   = _odds_decimal.get(_normalize_name(h["name"]))
+                mdl_p = _model_prob.get(h["name"], 0.0)
+                if dec is not None and dec > 0 and mdl_p > 0:
+                    mkt_p = 1.0 / dec
+                    vr    = mdl_p / mkt_p
+                    if vr <= 0.50:
+                        # Market rates much more than model — not a great win tip
+                        s *= 0.97
+                    # vr ≥ 1.5 is fine — model sees value the market misses
+
+            # Data quality: prefer well-documented horses for a win tip.
+            cov = h.get("_coverage", 0.5)
+            if cov >= 0.75:
+                s *= 1.02
+            elif cov < 0.30:
+                s *= 0.95
+            return s
 
         def _select_gold(ranked):
             pool = _qpool(ranked, set())
             if not pool:
                 return None
-            candidate = pool[0]   # top scorer in qualified pool
-            # Market sanity: demote extreme outsider when rank-2 is close
-            # in score and has genuine market support.
-            if len(pool) >= 2:
-                cand_dec = _odds_decimal.get(_normalize_name(candidate["name"]))
-                r2       = pool[1]
-                r2_dec   = _odds_decimal.get(_normalize_name(r2["name"]))
-                r2_close = (candidate["score"] > 0
-                            and r2["score"] / candidate["score"] >= 0.97)
-                if (cand_dec is not None
-                        and cand_dec >= _EXTREME_ODDS_DEC
-                        and r2_close
-                        and (r2_dec is None or r2_dec < _EXTREME_ODDS_DEC)):
-                    candidate = r2
-            return candidate
+            return max(pool, key=_gold_composite)
 
-        def _select_silver(ranked, gname):
+        # ── SILVER: Main danger — biggest threat to Gold ───────────────────────
+        # Silver is the horse most likely to beat Gold, not simply rank-2.
+        #
+        # Danger composite:
+        #   (1) Contention: must score ≥ 70% of Gold (genuine mathematical
+        #       contender — if it can't compete on score it can't threaten Gold).
+        #   (2) Market proximity: does the market also price it close to Gold?
+        #       proximity = Gold_decimal / h_decimal.
+        #       proximity ≥ 0.5 → within 2× Gold odds → genuine market threat (+10%).
+        #       proximity ≥ 0.25 → within 4× Gold odds → plausible danger (+3%).
+        #       proximity < 0.25 → >4× Gold odds → market outsider, not a danger (−10%).
+        #   (3) Profile diversity: mild boost when horse has a different dominant
+        #       strength to Gold (form-led vs connections-led), avoiding a
+        #       Gold-clone Silver that says nothing new.
+        def _select_silver(ranked, gold_entry):
+            if gold_entry is None:
+                return None
+            gname    = gold_entry["name"]
+            gold_sc  = gold_entry["score"]
+            gold_dec = _odds_decimal.get(_normalize_name(gname))
             pool = _qpool(ranked, {gname})
             if not pool:
                 return None
-            gold_sc = next((h["score"] for h in ranked
-                            if h["name"] == gname), 0.0)
 
-            # Hard cap: only ever consider the top-3 non-gold runners.
-            # This guarantees Silver never drifts deep into the field.
-            _SILVER_WINDOW = 3
-            candidates = pool[:_SILVER_WINDOW]
-
-            # Score floor: genuine contenders score ≥ 80 % of Gold.
-            # If nothing clears the bar, fall back to rank-2 (candidates[0]).
+            # Contention floor: ≥ 70% of Gold's score.
             contenders = [
-                h for h in candidates
-                if gold_sc == 0.0 or h["score"] / gold_sc >= _SILVER_MIN_RATIO
+                h for h in pool
+                if gold_sc == 0.0 or h["score"] / gold_sc >= 0.70
             ]
             if not contenders:
-                return candidates[0]
-            if len(contenders) == 1:
-                return contenders[0]
+                contenders = pool[:3]   # absolute fallback to top-3 non-gold
 
-            # Tiebreak within contenders using lightweight supporting signals.
-            # Score is already the primary ordering; these adjustments only
-            # flip the choice when horses are genuinely close.
-            #   (a) Extreme-outsider soft penalty (≥ 66/1): realistic supporting
-            #       picks should have at least some market backing.
-            #   (b) Wet-Jumps completion bonus: reward reliable finishers in
-            #       attritional conditions — meaningful only when wet_jumps=True.
-            _rmap = {r.name: r for r in runners}
-
-            def _silver_score(h):
+            def _silver_danger(h):
                 s = h["score"]
-                # (a) soft discount for genuine extreme outsiders
+
+                # (1) Contention scaling: 70–100% of Gold maps to mult 0.90–1.10.
+                ratio      = h["score"] / gold_sc if gold_sc > 0 else 1.0
+                contention = 0.90 + min(0.20, max(0.0,
+                                        (ratio - 0.70) / 0.30) * 0.20)
+                s *= contention
+
+                # (2) Market proximity to Gold.
                 dec = _odds_decimal.get(_normalize_name(h["name"]))
-                if dec is not None and dec >= _EXTREME_ODDS_DEC:
-                    s *= 0.92
-                # (b) wet-jumps completion rate bonus (range ±4 %)
-                if wet_jumps:
-                    r = _rmap.get(h["name"])
-                    if r and r.form:
-                        digits = sum(1 for c in r.form if c.isdigit())
-                        total  = digits + sum(
-                            1 for c in r.form.upper() if c in "FPRU")
-                        completion = digits / total if total > 0 else 0.5
-                        s *= (0.96 + 0.08 * completion)
+                if dec is not None and gold_dec is not None and dec > 0:
+                    proximity = gold_dec / dec   # 1.0 = same price; <1 = h longer
+                    if proximity >= 0.50:
+                        s *= 1.10   # within 2× Gold odds — market danger
+                    elif proximity >= 0.25:
+                        s *= 1.03   # within 4× Gold odds — plausible threat
+                    else:
+                        s *= 0.90   # >4× longer — market outsider, poor danger
+                elif dec is not None and dec > 0:
+                    # No gold odds for context: absolute caps as proxy.
+                    if dec <= 13.0:
+                        s *= 1.03   # ≤ 12/1: has backing
+                    elif dec > 34.0:
+                        s *= 0.92   # > 33/1: market outsider
+
+                # (3) Profile diversity: mild bonus for a different strength angle.
+                gold_form_lead = gold_entry["form"] > gold_entry["connections"]
+                h_form_lead    = h["form"]          > h["connections"]
+                if gold_form_lead != h_form_lead:
+                    s *= 1.02   # different dominant strength = different danger
+
                 return s
 
-            contenders.sort(key=_silver_score, reverse=True)
+            contenders.sort(key=_silver_danger, reverse=True)
             return contenders[0]
+
+        # ── DARK HORSE: Genuine value pick ─────────────────────────────────────
+        # Selects the horse the market most underestimates relative to the model.
+        #
+        # Core metric: value_ratio = model_implied_prob / market_implied_prob.
+        # value_ratio > 1.0 → model gives more probability than the price implies.
+        # value_ratio > 1.2 → genuine overlay — a real tipster's "value" pick.
+        #
+        # Upside bonuses:
+        #   • Official rating above field average (_rating_edge ≥ 5): rated well
+        #     but priced generously — the market is overlooking class.
+        #   • Strong recent form (form ≥ 0.85): in-form but under the radar.
+        #   • Above-average win-rate stats (_perf_b > 1.05): proven performer
+        #     at a price that doesn't reflect it.
+        #
+        # Constraints: score ≥ 55% of Gold, odds 5/1–20/1 (primary window),
+        # not Gold/Silver.  Fallback paths ensure a pick even without odds data.
+        #
+        # Composite = min(value_ratio, 3.0) × model_prob^0.3 × upside × data_quality.
+        # Blending value_ratio with model_prob^0.3 prevents mechanical inflation at
+        # extreme odds: a 33/1 horse with 9% model prob no longer outscores a 16/1
+        # horse with 12% model prob just because its market_prob denominator is tiny.
+        def _select_dark(ranked, gold_entry, silver_entry):
+            if not self.dark_horse_enabled:
+                return None
+            gname   = gold_entry["name"]  if gold_entry  else None
+            sname   = silver_entry["name"] if silver_entry else None
+            excl    = {gname, sname}
+            gold_sc = gold_entry["score"] if gold_entry else 0.0
+            pool    = [h for h in ranked if h["name"] not in excl]
+            if not pool:
+                return None
+
+            _DH_SCORE_FLOOR  = 0.55 * gold_sc
+            _DH_MIN_DEC      = 6.0    # 5/1 in decimal
+            _DH_PRIMARY_MAX  = 21.0   # 20/1 — primary window, plausible dark horse
+            _DH_FALLBACK_MAX = 34.0   # 33/1 — wider fallback if primary empty
+
+            def _value_composite(h):
+                dec   = _odds_decimal.get(_normalize_name(h["name"]))
+                mdl_p = _model_prob.get(h["name"], 0.0)
+                if dec is not None and dec > 0 and mdl_p > 0:
+                    mkt_p   = 1.0 / dec
+                    v_ratio = mdl_p / mkt_p   # > 1 = model rates better than market
+                else:
+                    v_ratio = 1.0   # no odds: neutral value signal
+
+                # Cap v_ratio at 3.0 then blend with model_prob^0.3 so that
+                # long-priced horses can't dominate purely from a tiny mkt_p.
+                v_capped = min(v_ratio, 3.0)
+                if v_ratio < 1.20:
+                    v_capped = max(0.50, v_ratio * 0.80)  # penalise non-value
+
+                plausibility = mdl_p ** 0.3 if mdl_p > 0 else 0.5
+
+                # Upside signals: each rewards a different kind of hidden potential.
+                upside = 1.0
+                if h.get("_rating_edge", 0.0) >= 5.0:
+                    upside *= 1.05   # rated above field average but priced long
+                if h["form"] >= 0.85:
+                    upside *= 1.03   # solid recent form, undervalued in market
+                if h.get("_perf_b", 1.0) > 1.05:
+                    upside *= 1.02   # win-rate stats suggest upside
+
+                # Data quality: value picks need enough data to trust.
+                cov = h.get("_coverage", 0.5)
+                cov_factor = 1.0 if cov >= 0.40 else 0.88
+
+                return v_capped * plausibility * upside * cov_factor
+
+            # Primary: score ≥ floor, odds 5/1–20/1 (plausible dark horse window).
+            candidates = [
+                h for h in pool
+                if (h["score"] >= _DH_SCORE_FLOOR
+                    and _DH_MIN_DEC <= _odds_decimal.get(
+                        _normalize_name(h["name"]), -1.0) <= _DH_PRIMARY_MAX)
+            ]
+            if candidates:
+                candidates.sort(key=_value_composite, reverse=True)
+                best = candidates[0]
+                return {**best, "label": "Value Play", "writeup": _wp(best)}
+
+            # Fallback 1: widen odds window to 33/1, relax score floor.
+            fallback_a = [
+                h for h in pool
+                if _DH_MIN_DEC <= _odds_decimal.get(
+                    _normalize_name(h["name"]), -1.0) <= _DH_FALLBACK_MAX
+            ]
+            if fallback_a:
+                fallback_a.sort(key=_value_composite, reverse=True)
+                best = fallback_a[0]
+                return {**best, "label": "Value Play", "writeup": _wp(best)}
+
+            # Fallback 2: no odds at all — rank by upside signals + score.
+            remaining = [h for h in pool if h["score"] >= 0.50 * gold_sc]
+            if not remaining:
+                remaining = pool
+            remaining.sort(
+                key=lambda h: (h.get("_rating_edge", 0.0) * 0.3
+                               + h["form"] * 0.4
+                               + h["score"] * 0.3),
+                reverse=True,
+            )
+            best = remaining[0]
+            return {**best, "label": "Value Play", "writeup": _wp(best)}
 
         gold_entry   = _select_gold(scored)
         gold_name    = gold_entry["name"] if gold_entry else None
-        silver_entry = _select_silver(scored, gold_name) if gold_name else None
+        silver_entry = _select_silver(scored, gold_entry) if gold_entry else None
         silver_name  = silver_entry["name"] if silver_entry else None
+        dark         = _select_dark(scored, gold_entry, silver_entry)
 
         gold   = ({**gold_entry,   "label": "Good E/W Bet",
                    "writeup": _wp(gold_entry)}   if gold_entry   else None)
         silver = ({**silver_entry, "label": "Good Place Bet",
                    "writeup": _wp(silver_entry)} if silver_entry else None)
-
-        # ── Dark horse selection ──────────────────────────────────────────────
-        # When dark_horse_enabled is True a dark horse is ALWAYS returned for
-        # any field with ≥3 runners (guaranteed by the fallback below).
-        # When False, only Gold + Silver are returned; selection is skipped.
-        #
-        # Priority:
-        #   Primary  — sensible value pick: rank 3–6, odds [6/1, 33/1],
-        #              score ≥ 85% of gold, not already gold/silver.
-        #   Fallback — if primary finds nothing: best-remaining runner by score,
-        #              avoiding extreme outsiders (>50/1) when possible.
-        #              Never returns gold or silver.
-        dark = None
-        if self.dark_horse_enabled:
-            _dh_min_dec     = 7.0    # 6/1  in decimal
-            _dh_max_dec     = 34.0   # 33/1 in decimal
-            _dh_score_floor = 0.85 * (gold_entry["score"] if gold_entry else 0.0)
-            _main_names     = {gold_name, silver_name}
-
-            # ── Primary: strict value criteria (ranks 3–6) ───────────────────
-            for _dh_rank, candidate in enumerate(scored):
-                if _dh_rank < 2:
-                    continue                      # ranks 1 & 2 are gold/silver
-                if _dh_rank > 5:
-                    break                         # only consider ranks 3–6
-                if candidate["name"] in _main_names:
-                    continue
-                if candidate["score"] < _dh_score_floor:
-                    continue
-                _cand_dec = _odds_decimal.get(_normalize_name(candidate["name"]))
-                if _cand_dec is None:
-                    continue                      # odds required for primary pick
-                if not (_dh_min_dec <= _cand_dec <= _dh_max_dec):
-                    continue
-                # First qualifying candidate wins
-                dark = {**candidate, "label": "Value Play",
-                        "writeup": _wp(candidate)}
-                break
-
-            # ── Fallback: guarantee a pick when primary criteria find nothing ─
-            # Selects the highest-scoring remaining runner (not gold/silver).
-            # Avoids extreme outsiders (>50/1) when a sensible alternative
-            # exists; if odds are absent, uses score ranking only.
-            if dark is None:
-                _remaining = [h for h in scored if h["name"] not in _main_names]
-                if _remaining:
-                    _EXTREME_DEC = 51.0
-                    _sensible = [
-                        h for h in _remaining
-                        if _odds_decimal.get(
-                            _normalize_name(h["name"]), 0.0
-                        ) < _EXTREME_DEC
-                    ]
-                    _pool = _sensible if _sensible else _remaining
-                    _best = max(_pool, key=lambda h: h["score"])
-                    dark = {**_best, "label": "Value Play",
-                            "writeup": _wp(_best)}
 
         dark_name = dark["name"] if dark else None
 
