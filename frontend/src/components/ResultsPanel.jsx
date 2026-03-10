@@ -36,7 +36,7 @@ export default function ResultsPanel({ result }) {
     result.dark_horse && darkName !== silverName && { pick: "DARK HORSE", name: darkName, model_alignment: result.dark_horse.confidence, why: result.dark_horse.label, writeup: result.dark_horse.writeup },
   ].filter(Boolean);
 
-  const engine_version = "PeakPace v1";
+  const engine_version = "PeakPace v1 [build:7748e38]";
   const note = "Scores are model estimates — always verify with your own analysis.";
   const raceConf = result.race_confidence || null;
   const confStyle = raceConf === "HIGH"

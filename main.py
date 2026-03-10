@@ -792,6 +792,7 @@ def analyze(request: AnalyzeRequest):
     result["discipline_display"] = _discipline_display(disc["discipline"], disc["subtype"])
     result["ground_bucket"]      = ground_bucket
     result["wet_jumps_mode"]     = (disc["discipline"] == "Jumps" and ground_bucket == "Wet")
+    result["_build"]             = "7748e38"
     return result
 
 
@@ -989,6 +990,7 @@ def analyze_text(request: AnalyzeTextRequest):
     result["discipline_display"] = _discipline_display(disc["discipline"], disc["subtype"])
     result["ground_bucket"]      = ground_bucket
     result["wet_jumps_mode"]     = (disc["discipline"] == "Jumps" and ground_bucket == "Wet")
+    result["_build"]             = "7748e38"
     return result
 
 
