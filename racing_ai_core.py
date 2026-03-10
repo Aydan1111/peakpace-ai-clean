@@ -1621,29 +1621,114 @@ class RacingAICore:
                 entry["_rating_edge"],
             )
 
-        # Picks — prefer horses with sufficient data (conf_deduction < 5).
-        # A deduction of 5+ means at least two data sources are missing
-        # (e.g. trainer + horse, or trainer + jockey), making the pick
-        # little better than a guess.  Falls back to the full sorted list
-        # if every runner in the field has limited data.
-        _PICK_DED_LIMIT = 5
+        # ── Tipster-grade pick selection ──────────────────────────────────────
+        #
+        # Gold  = best WIN candidate.
+        #   • Top-scoring qualified runner as before.
+        #   • One market-sanity bypass: when Gold is an extreme outsider
+        #     (66/1+) but rank-2 scores within 3 % of Gold AND has real
+        #     market support, rank-2 is the better win tip for a tipping
+        #     service.
+        #
+        # Silver = strongest non-Gold DANGER / place backup.
+        #   • Must be a genuine contender: score ≥ 80 % of Gold.
+        #     (Prevents a rank-10 horse becoming Silver merely because
+        #     ranks 2–9 all failed the data-quality bar.)
+        #   • Prefers market-supported candidates (≤ 33/1).
+        #   • Wet Jumps tiebreak: among close-scoring candidates, prefer
+        #     the more reliable finisher (form completion rate) — a key
+        #     trait in attritional, wet-ground races.
+        #   • Falls back to raw rank-2 when no contender clears the bar.
+        #
+        # Data-quality bar: prefer _conf_ded < 5 (unchanged from before).
+        _PICK_DED_LIMIT   = 5      # max acceptable data-quality penalty
+        _EXTREME_ODDS_DEC = 67.0   # 66/1+ in decimal = extreme outsider
+        _SILVER_MIN_RATIO = 0.80   # silver must score ≥ 80 % of gold
+        _SILVER_ODDS_CAP  = 35.0   # silver prefers ≤ 33/1 (35.0 decimal)
 
-        def _best_pick(ranked, exclude_names):
+        def _qpool(ranked, exclude_names):
+            """Qualified pool: data-quality filtered, fallback to full."""
             pool = [h for h in ranked if h["name"] not in exclude_names]
-            qualified = [h for h in pool if h["_conf_ded"] < _PICK_DED_LIMIT]
-            return (qualified or pool or [None])[0]
+            q    = [h for h in pool if h["_conf_ded"] < _PICK_DED_LIMIT]
+            return q if q else pool
 
-        gold_entry   = _best_pick(scored, set())
-        gold_exclude = {gold_entry["name"]} if gold_entry else set()
-        silver_entry = _best_pick(scored, gold_exclude)
+        def _select_gold(ranked):
+            pool = _qpool(ranked, set())
+            if not pool:
+                return None
+            candidate = pool[0]   # top scorer in qualified pool
+            # Market sanity: demote extreme outsider when rank-2 is close
+            # in score and has genuine market support.
+            if len(pool) >= 2:
+                cand_dec = _odds_decimal.get(_normalize_name(candidate["name"]))
+                r2       = pool[1]
+                r2_dec   = _odds_decimal.get(_normalize_name(r2["name"]))
+                r2_close = (candidate["score"] > 0
+                            and r2["score"] / candidate["score"] >= 0.97)
+                if (cand_dec is not None
+                        and cand_dec >= _EXTREME_ODDS_DEC
+                        and r2_close
+                        and (r2_dec is None or r2_dec < _EXTREME_ODDS_DEC)):
+                    candidate = r2
+            return candidate
+
+        def _select_silver(ranked, gname):
+            pool = _qpool(ranked, {gname})
+            if not pool:
+                return None
+            gold_sc = next((h["score"] for h in ranked
+                            if h["name"] == gname), 0.0)
+
+            # Must be a genuine contender — score ≥ 80 % of Gold.
+            contenders = [
+                h for h in pool
+                if gold_sc == 0.0 or h["score"] / gold_sc >= _SILVER_MIN_RATIO
+            ]
+            if not contenders:
+                return pool[0]   # graceful fallback: raw rank-2
+
+            # Prefer market-backed candidates (≤ 33/1).
+            # Horses with no odds data are treated as eligible.
+            market_backed = [
+                h for h in contenders
+                if (_normalize_name(h["name"]) not in _odds_decimal
+                    or _odds_decimal[_normalize_name(h["name"])] < _SILVER_ODDS_CAP)
+            ]
+            silver_pool = market_backed if market_backed else contenders
+
+            # Wet Jumps tiebreak: among horses within 2 % of the top
+            # silver-pool score (genuine score ties), prefer the more
+            # reliable finisher.  A 2 % window avoids overriding clear
+            # score differences; only truly near-identical candidates
+            # are differentiated by completion rate.
+            if wet_jumps and len(silver_pool) > 1:
+                top_s = silver_pool[0]["score"]
+                close = [h for h in silver_pool
+                         if top_s == 0.0 or h["score"] / top_s >= 0.98]
+                if len(close) > 1:
+                    _rmap = {r.name: r for r in runners}
+                    def _completion(h):
+                        r = _rmap.get(h["name"])
+                        if r and r.form:
+                            digits = sum(1 for c in r.form if c.isdigit())
+                            total  = digits + sum(
+                                1 for c in r.form.upper() if c in "FPRU")
+                            return digits / total if total > 0 else 0.5
+                        return 0.5
+                    close.sort(key=_completion, reverse=True)
+                    return close[0]
+
+            return silver_pool[0]
+
+        gold_entry   = _select_gold(scored)
+        gold_name    = gold_entry["name"] if gold_entry else None
+        silver_entry = _select_silver(scored, gold_name) if gold_name else None
+        silver_name  = silver_entry["name"] if silver_entry else None
 
         gold   = ({**gold_entry,   "label": "Good E/W Bet",
                    "writeup": _wp(gold_entry)}   if gold_entry   else None)
         silver = ({**silver_entry, "label": "Good Place Bet",
                    "writeup": _wp(silver_entry)} if silver_entry else None)
-
-        gold_name   = gold_entry["name"]   if gold_entry   else None
-        silver_name = silver_entry["name"] if silver_entry else None
 
         # ── Dark horse selection ──────────────────────────────────────────────
         # When dark_horse_enabled is True a dark horse is ALWAYS returned for
