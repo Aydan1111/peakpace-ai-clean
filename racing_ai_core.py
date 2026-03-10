@@ -1650,7 +1650,11 @@ class RacingAICore:
         #   Overlap prevention: never Gold or Silver.
         # ─────────────────────────────────────────────────────────────────────
 
-        _PICK_DED_LIMIT = 5
+        # Exclude from quality pool only when BOTH trainer AND jockey are
+        # unknown (deduction ≥ 6). A single known entity (famous trainer or
+        # jockey) still provides meaningful signal so a deduction of 5 is
+        # not sufficient reason to bar a horse from Gold/Silver consideration.
+        _PICK_DED_LIMIT = 6
 
         def _qpool(ranked, exclude_names):
             pool = [h for h in ranked if h["name"] not in exclude_names]
@@ -1719,27 +1723,73 @@ class RacingAICore:
                 key=lambda k: {"form": g_form_rel, "class": g_class_rel, "conn": g_conn_rel}[k],
             )
 
+            # Build runner map for trainer-diversity check.
+            _rmap_silver = {r.name: r for r in runners}
+            gold_runner  = _rmap_silver.get(gold_entry["name"])
+            gold_trainer = gold_runner.trainer.strip().lower() if gold_runner else ""
+
+            # Hard-reject same trainer as Gold when alternatives exist.
+            # A horse from the same stable brings the same information as Gold;
+            # Silver should represent a genuinely independent danger.
+            if gold_trainer:
+                non_clone = [
+                    h for h in contenders
+                    if not (gold_trainer and
+                            (_rmap_silver.get(h["name"]) and
+                             _rmap_silver[h["name"]].trainer.strip().lower() == gold_trainer))
+                ]
+                if non_clone:
+                    contenders = non_clone
+
+            # Gold's decimal odds — used for Silver's market plausibility gate.
+            gold_dec_v = (_odds_decimal.get(_normalize_name(gname), 0.0)
+                          if gname else 0.0)
+
             def _silver_threat(h):
-                # (1) Contention: scale 75–100% of Gold → multiplier 0.88–1.08.
+                # (1) Contention²: score proximity to Gold is the dominant signal.
+                #     Squaring amplifies the gap so a horse at 79% of Gold can't
+                #     beat one at 95% just by having a different strength profile.
                 ratio      = h["score"] / gold_sc if gold_sc > 0 else 1.0
                 contention = 0.88 + min(0.20, max(0.0, (ratio - 0.75) / 0.25) * 0.20)
+                cont_sq    = contention ** 2   # amplify proximity advantage
 
-                # (2) Profile contrast: is this horse strong where Gold is weak?
+                # (2) Profile distance: secondary tiebreaker for close scores.
+                #     Normalised vectors; distance 0.0 = identical, 2.0 = opposite.
                 h_form_rel  = h["form"]                       / _avg_form  if _avg_form  > 0 else 1.0
                 h_class_rel = (h["_rating_b"] * h["_perf_b"]) / _avg_class if _avg_class > 0 else 1.0
                 h_conn_rel  = h["connections"]                / _avg_conn  if _avg_conn  > 0 else 1.0
-                h_dominant  = max(
-                    {"form": h_form_rel, "class": h_class_rel, "conn": h_conn_rel},
-                    key=lambda k: {"form": h_form_rel, "class": h_class_rel, "conn": h_conn_rel}[k],
-                )
-                # Different dominant strength = genuine alternative danger angle.
-                contrast = 1.07 if h_dominant != gold_dominant else 0.96
+                g_tot = g_form_rel + g_class_rel + g_conn_rel
+                h_tot = h_form_rel + h_class_rel + h_conn_rel
+                if g_tot > 0 and h_tot > 0:
+                    gv   = (g_form_rel/g_tot, g_class_rel/g_tot, g_conn_rel/g_tot)
+                    hv   = (h_form_rel/h_tot, h_class_rel/h_tot, h_conn_rel/h_tot)
+                    dist = sum(abs(gv[i] - hv[i]) for i in range(3))
+                else:
+                    dist = 0.0
+                contrast = 1.0 + dist * 0.06   # max +12% — secondary, not dominant
 
-                # (3) Going suitability and data reliability.
+                # (3) Market plausibility: Silver must be a realistic challenger.
+                #     A horse priced at 8× Gold's odds is not a credible main danger
+                #     regardless of how different its profile is.
+                #     Applied as a soft bonus/penalty, not a hard gate.
+                if gold_dec_v > 0 and _odds_decimal:
+                    h_dec      = _odds_decimal.get(_normalize_name(h["name"]), gold_dec_v)
+                    price_ratio = h_dec / gold_dec_v
+                    if price_ratio <= 2.0:
+                        mkt_plaus = 1.06   # within 2× Gold — credible rival
+                    elif price_ratio <= 4.0:
+                        mkt_plaus = 1.02   # up to 4× — borderline credible
+                    else:
+                        # Soft penalty beyond 4×; floor at 0.85 for extreme cases
+                        mkt_plaus = max(0.85, 1.0 - (price_ratio - 4.0) * 0.04)
+                else:
+                    mkt_plaus = 1.0
+
+                # (4) Going suitability and data reliability.
                 suitability = max(0.85, 1.0 - h["_going_pen"] * 0.06)
                 reliability = min(1.0, 0.82 + h["_coverage"] * 0.36)
 
-                return contention * contrast * suitability * reliability
+                return cont_sq * contrast * mkt_plaus * suitability * reliability
 
             contenders.sort(key=_silver_threat, reverse=True)
             return contenders[0]
@@ -1763,6 +1813,50 @@ class RacingAICore:
             ]
             if not plausible:
                 plausible = pool
+
+            # ── Price gate (when odds are available) ─────────────────────────
+            # A dark horse must be longer-priced than Gold.  A 2/1 shot with
+            # great connections is not a dark horse — it is simply a well-fancied
+            # contender.  The gate is applied in three tiers, relaxing each time
+            # no qualifying horses are found:
+            #
+            #   Tier 1: > Gold odds AND ≥ 5/1 (strict — genuine dark horse price)
+            #   Tier 2: ≥ 5/1 absolute minimum (same stable as Gold may appear)
+            #   Tier 3: no price constraint (e.g. race has only short-priced horses)
+            if _odds_decimal:
+                gold_dec_v  = (_odds_decimal.get(_normalize_name(gname), 0.0)
+                               if gname else 0.0)
+                _DH_ABS_MIN = 6.0   # 5/1 in decimal — hard minimum for tier 1 & 2
+
+                # Tier 1: must be strictly longer than Gold AND ≥ 5/1
+                tier1 = [
+                    h for h in plausible
+                    if (_odds_decimal.get(_normalize_name(h["name"]), 0.0) > gold_dec_v
+                        and _odds_decimal.get(_normalize_name(h["name"]), 0.0) >= _DH_ABS_MIN)
+                ]
+                # Tier 2: just ≥ 5/1 absolute minimum
+                tier2 = [
+                    h for h in plausible
+                    if _odds_decimal.get(_normalize_name(h["name"]), 0.0) >= _DH_ABS_MIN
+                ]
+                if tier1:
+                    plausible = tier1
+                elif tier2:
+                    plausible = tier2
+                # else tier 3: keep full plausible pool (very short-priced fields)
+
+                # Hard cap: if every remaining candidate is > 33/1 (dec > 34),
+                # there is no credible dark horse in this field — return None
+                # rather than recommending a near-hopeless punt.
+                _DH_HARD_MAX = 34.0  # 33/1 in decimal
+                non_extreme = [
+                    h for h in plausible
+                    if _odds_decimal.get(_normalize_name(h["name"]), 0.0) <= _DH_HARD_MAX
+                ]
+                if non_extreme:
+                    plausible = non_extreme
+                else:
+                    return None
 
             def _upside_score(h):
                 # (a) Rating above field average but ranked lower by model.
