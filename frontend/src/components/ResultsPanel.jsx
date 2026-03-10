@@ -36,23 +36,6 @@ export default function ResultsPanel({ result }) {
     result.dark_horse && darkName !== silverName && { pick: "DARK HORSE", name: darkName, model_alignment: result.dark_horse.confidence, why: result.dark_horse.label, writeup: result.dark_horse.writeup },
   ].filter(Boolean);
 
-  const predictions_table = (result.full_rankings || []).map((r) => {
-    let pick = null;
-    if (r.name === goldName) pick = "GOLD";
-    else if (r.name === silverName) pick = "SILVER";
-    else if (r.name === darkName) pick = "DARK HORSE";
-    return {
-      name: r.name,
-      total_score: r.score,
-      model_alignment: r.confidence,
-      form: r.form || 0,
-      connections: r.connections || 0,
-      structural: r.structural || 0,
-      fitness: r.fitness || 0,
-      pick,
-    };
-  });
-
   const engine_version = "PeakPace v1";
   const note = "Scores are model estimates — always verify with your own analysis.";
   const raceConf = result.race_confidence || null;
@@ -122,62 +105,6 @@ export default function ResultsPanel({ result }) {
         })}
       </div>
 
-      {/* Full Rankings Table */}
-      <div>
-        <h3 className="text-sm font-semibold text-text-dim uppercase tracking-wide mb-3">
-          Full Rankings
-        </h3>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-left text-xs uppercase tracking-wide text-text-dim border-b border-border">
-                <th className="pb-2 pr-3">Rank</th>
-                <th className="pb-2 pr-3">Horse</th>
-                <th className="pb-2 pr-3">Score</th>
-                <th className="pb-2 pr-3">Alignment</th>
-                <th className="pb-2 pr-3">Form</th>
-                <th className="pb-2 pr-3">Connections</th>
-                <th className="pb-2 pr-3">Structural</th>
-                <th className="pb-2 pr-3">Fitness</th>
-                <th className="pb-2">Pick</th>
-              </tr>
-            </thead>
-            <tbody>
-              {(predictions_table || []).map((row, i) => (
-                <tr
-                  key={row.name}
-                  className="border-b border-border/30 hover:bg-surface-light transition-colors"
-                >
-                  <td className="py-2.5 pr-3 text-text-dim">{i + 1}</td>
-                  <td className="py-2.5 pr-3 font-medium">{row.name}</td>
-                  <td className="py-2.5 pr-3 font-mono">
-                    {row.total_score.toFixed(2)}
-                  </td>
-                  <td className="py-2.5 pr-3">
-                    <AlignmentBadge value={row.model_alignment} />
-                  </td>
-                  <td className="py-2.5 pr-3 font-mono">
-                    {row.form.toFixed(1)}
-                  </td>
-                  <td className="py-2.5 pr-3 font-mono">
-                    {row.connections.toFixed(1)}
-                  </td>
-                  <td className="py-2.5 pr-3 font-mono">
-                    {row.structural.toFixed(1)}
-                  </td>
-                  <td className="py-2.5 pr-3 font-mono">
-                    {row.fitness.toFixed(1)}
-                  </td>
-                  <td className="py-2.5">
-                    <PickBadge pick={row.pick} />
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
       {/* Footer */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 pt-2 border-t border-border/50">
         <p className="text-xs text-text-dim italic">{note}</p>
@@ -187,26 +114,3 @@ export default function ResultsPanel({ result }) {
   );
 }
 
-function AlignmentBadge({ value }) {
-  const v = Math.round(value);
-  let color = "text-text-dim";
-  if (v >= 85) color = "text-green-400";
-  else if (v >= 78) color = "text-gold";
-
-  return (
-    <span className={`font-mono font-semibold ${color}`}>{v}%</span>
-  );
-}
-
-function PickBadge({ pick }) {
-  if (!pick) return <span className="text-text-dim">-</span>;
-  const cfg = PICK_CONFIG[pick];
-  if (!cfg) return <span>{pick}</span>;
-  return (
-    <span
-      className={`inline-flex items-center gap-1 text-xs font-bold ${cfg.text}`}
-    >
-      {cfg.emoji} {pick}
-    </span>
-  );
-}
