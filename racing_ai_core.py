@@ -1679,51 +1679,15 @@ class RacingAICore:
             gold_sc = next((h["score"] for h in ranked
                             if h["name"] == gname), 0.0)
 
-            # Must be a genuine contender — score ≥ 80 % of Gold.
+            # Silver is always the highest-scoring non-gold runner (rank 2 by
+            # score), keeping it in sync with full_rankings order.
+            # A 80% floor is applied; if rank-2 is below it, fall back to
+            # pool[0] regardless (still rank-2 in the table).
             contenders = [
                 h for h in pool
                 if gold_sc == 0.0 or h["score"] / gold_sc >= _SILVER_MIN_RATIO
             ]
-            if not contenders:
-                return pool[0]   # graceful fallback: raw rank-2
-
-            # Prefer market-backed candidates (≤ 33/1).
-            # When field-wide odds are present, horses not found in the odds
-            # dict are treated as uncertain (not auto-eligible).  When no
-            # odds data exists at all, all contenders are eligible.
-            if _odds_decimal:
-                market_backed = [
-                    h for h in contenders
-                    if _odds_decimal.get(_normalize_name(h["name"]),
-                                        _SILVER_ODDS_CAP) < _SILVER_ODDS_CAP
-                ]
-            else:
-                market_backed = list(contenders)
-            silver_pool = market_backed if market_backed else contenders
-
-            # Wet Jumps tiebreak: among horses within 2 % of the top
-            # silver-pool score (genuine score ties), prefer the more
-            # reliable finisher.  A 2 % window avoids overriding clear
-            # score differences; only truly near-identical candidates
-            # are differentiated by completion rate.
-            if wet_jumps and len(silver_pool) > 1:
-                top_s = silver_pool[0]["score"]
-                close = [h for h in silver_pool
-                         if top_s == 0.0 or h["score"] / top_s >= 0.98]
-                if len(close) > 1:
-                    _rmap = {r.name: r for r in runners}
-                    def _completion(h):
-                        r = _rmap.get(h["name"])
-                        if r and r.form:
-                            digits = sum(1 for c in r.form if c.isdigit())
-                            total  = digits + sum(
-                                1 for c in r.form.upper() if c in "FPRU")
-                            return digits / total if total > 0 else 0.5
-                        return 0.5
-                    close.sort(key=_completion, reverse=True)
-                    return close[0]
-
-            return silver_pool[0]
+            return contenders[0] if contenders else pool[0]
 
         gold_entry   = _select_gold(scored)
         gold_name    = gold_entry["name"] if gold_entry else None
