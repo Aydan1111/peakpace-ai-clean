@@ -12,9 +12,14 @@ export default function ModeToggle({ mode, onChange }) {
           active={mode === "paste"}
           onClick={() => onChange("paste")}
         >
-          Paste Text
+          Paste Racecard
         </ToggleButton>
-
+        <ToggleButton
+          active={mode === "guided"}
+          onClick={() => onChange("guided")}
+        >
+          Guided Entry
+        </ToggleButton>
       </div>
     </div>
   );

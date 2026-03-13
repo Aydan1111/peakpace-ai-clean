@@ -18,6 +18,115 @@ const API_BASE =
   ).replace(/\/+$/, "");
 
 // ---------------------------------------------------------------------------
+// Guided Entry — inline fallback template (used if /canonical-template fails)
+// ---------------------------------------------------------------------------
+const GUIDED_TEMPLATE_FALLBACK = `COURSE:
+RACE:
+TYPE:
+DISTANCE:
+RUNNERS:
+CLASS:
+GOING / GROUND:
+GROUND:
+
+HORSE:
+JOCKEY:
+TRAINER:
+FORM:
+AGE:
+WEIGHT:
+ODDS:
+EQUIPMENT:
+COMMENT:
+
+RECENT RUNS:
+
+HORSE:
+JOCKEY:
+TRAINER:
+FORM:
+AGE:
+WEIGHT:
+ODDS:
+EQUIPMENT:
+COMMENT:
+
+RECENT RUNS:
+
+HORSE:
+JOCKEY:
+TRAINER:
+FORM:
+AGE:
+WEIGHT:
+ODDS:
+EQUIPMENT:
+COMMENT:
+
+RECENT RUNS:
+
+HORSE:
+JOCKEY:
+TRAINER:
+FORM:
+AGE:
+WEIGHT:
+ODDS:
+EQUIPMENT:
+COMMENT:
+
+RECENT RUNS:
+
+HORSE:
+JOCKEY:
+TRAINER:
+FORM:
+AGE:
+WEIGHT:
+ODDS:
+EQUIPMENT:
+COMMENT:
+
+RECENT RUNS:
+
+HORSE:
+JOCKEY:
+TRAINER:
+FORM:
+AGE:
+WEIGHT:
+ODDS:
+EQUIPMENT:
+COMMENT:
+
+RECENT RUNS:
+
+HORSE:
+JOCKEY:
+TRAINER:
+FORM:
+AGE:
+WEIGHT:
+ODDS:
+EQUIPMENT:
+COMMENT:
+
+RECENT RUNS:
+
+HORSE:
+JOCKEY:
+TRAINER:
+FORM:
+AGE:
+WEIGHT:
+ODDS:
+EQUIPMENT:
+COMMENT:
+
+RECENT RUNS:
+`;
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
@@ -139,6 +248,10 @@ export default function App() {
   const [race, setRace] = useState(DEFAULT_RACE);
   const [runners, setRunners] = useState(DEFAULT_RUNNERS);
   const [pasteText, setPasteText] = useState("");
+  // guidedText is pre-populated with the canonical template on first switch to
+  // guided mode and then edited freely by the user.
+  const [guidedText, setGuidedText] = useState("");
+  const [guidedTemplateLoaded, setGuidedTemplateLoaded] = useState(false);
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -146,7 +259,31 @@ export default function App() {
   // Dark horse toggle — off by default; Gold + Silver only when false
   const [darkHorseEnabled, setDarkHorseEnabled] = useState(false);
 
+  // When switching to guided mode for the first time, fetch and pre-populate
+  // the canonical template from the backend.
+  const handleModeChange = (newMode) => {
+    setInputMode(newMode);
+    if (newMode === "guided" && !guidedTemplateLoaded) {
+      fetch(`${API_BASE}/canonical-template`)
+        .then((r) => r.json())
+        .then((data) => {
+          if (data.template && !guidedText) {
+            setGuidedText(data.template);
+          }
+          setGuidedTemplateLoaded(true);
+        })
+        .catch(() => {
+          // Fallback inline template if the endpoint is unreachable
+          if (!guidedText) {
+            setGuidedText(GUIDED_TEMPLATE_FALLBACK);
+          }
+          setGuidedTemplateLoaded(true);
+        });
+    }
+  };
+
   const handlePasteChange = (val) => setPasteText(val);
+  const handleGuidedChange = (val) => setGuidedText(val);
   const handleRaceChange  = (val) => setRace(val);
   const handleRunnersChange = (val) => setRunners(val);
 
@@ -156,10 +293,13 @@ export default function App() {
     runners.length >= 2 &&
     runners.every((r) => r.name.trim() !== "");
 
-  const canSubmitPaste = !loading && pasteText.trim().length > 0;
+  const canSubmitPaste  = !loading && pasteText.trim().length > 0;
+  const canSubmitGuided = !loading && guidedText.trim().length > 0;
 
   const canSubmit =
-    inputMode === "manual" ? canSubmitManual : canSubmitPaste;
+    inputMode === "manual"  ? canSubmitManual  :
+    inputMode === "guided"  ? canSubmitGuided  :
+    canSubmitPaste;
 
   const analyze = async () => {
     setLoading(true);
@@ -167,16 +307,17 @@ export default function App() {
     setResult(null);
 
     try {
-      const url =
-        inputMode === "paste" ? `${API_BASE}/analyze-text` : `${API_BASE}/analyze`;
+      // "guided" uses the same /analyze-text backend as "paste"
+      const isTextMode = inputMode === "paste" || inputMode === "guided";
+      const url = isTextMode ? `${API_BASE}/analyze-text` : `${API_BASE}/analyze`;
 
       // -----------------------------------------------------------------
-      // JSON MODES — paste and manual
+      // JSON MODES — paste/guided and manual
       // -----------------------------------------------------------------
       let payload;
 
       // For manual mode, build odds dict from inline runner odds fields.
-      // For paste mode, odds are extracted per-runner in the backend parser
+      // For paste/guided mode, odds are extracted per-runner in the backend parser
       // (ODDS: field in each racecard block); no separate odds payload needed.
       const inlineOdds = Object.fromEntries(
         runners
@@ -185,9 +326,10 @@ export default function App() {
       );
       const manualOddsPayload = Object.keys(inlineOdds).length > 0 ? inlineOdds : undefined;
 
-      if (inputMode === "paste") {
+      if (isTextMode) {
         // /analyze-text expects { race_info: {...}, racecard_text: "..." }
-        // Odds come from ODDS: fields inside the pasted racecard text.
+        // Odds come from ODDS: fields inside the pasted/guided racecard text.
+        const racecardText = inputMode === "guided" ? guidedText : pasteText;
         payload = {
           race_info: {
             course:        race.course || "Unknown",
@@ -198,7 +340,7 @@ export default function App() {
             going:         race.going,
             ground_bucket: race.ground_bucket || null,
           },
-          racecard_text: pasteText,
+          racecard_text: racecardText,
           dark_horse_enabled: darkHorseEnabled,
         };
       } else {
@@ -290,15 +432,21 @@ export default function App() {
       <div className="px-4 py-8 sm:px-6 lg:px-8">
         <div className="max-w-5xl mx-auto space-y-6">
 
-          <ModeToggle mode={inputMode} onChange={setInputMode} />
+          <ModeToggle mode={inputMode} onChange={handleModeChange} />
 
           {inputMode === "manual" ? (
             <>
               <RaceForm race={race} onChange={handleRaceChange} />
               <RunnerTable runners={runners} onChange={handleRunnersChange} />
             </>
+          ) : inputMode === "guided" ? (
+            <PasteInput
+              value={guidedText}
+              onChange={handleGuidedChange}
+              mode="guided"
+            />
           ) : (
-            <PasteInput value={pasteText} onChange={handlePasteChange} />
+            <PasteInput value={pasteText} onChange={handlePasteChange} mode="paste" />
           )}
 
           {/* Dark Horse Toggle */}

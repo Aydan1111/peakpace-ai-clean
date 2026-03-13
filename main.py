@@ -157,8 +157,10 @@ _UK_COURSES = frozenset({
 
 # Structured header line:  COURSE: Newcastle  /  DISTANCE: 6f  / …
 # GROUND: Wet | GROUND: Dry is also supported as an explicit override.
+# "GOING / GROUND:" must be listed before bare "GOING" and "GROUND" so the
+# longer token matches first on lines like "GOING / GROUND: Good to Soft".
 _HEADER_STRUCTURED_RE = re.compile(
-    r"^(COURSE|DISTANCE|RUNNERS?|CLASS|TYPE|RACE(?:[\s_]NAME)?|GOING|GROUND)\s*:\s*(.+)",
+    r"^(COURSE|DISTANCE|RUNNERS?|CLASS|TYPE|RACE(?:[\s_]NAME)?|GOING\s*/\s*GROUND|GOING|GROUND)\s*:\s*(.+)",
     re.I,
 )
 
@@ -210,6 +212,9 @@ _TYPE_OVERRIDE_MAP = {
     "nh flat":  {"discipline": "Jumps", "subtype": "NH Flat"},
     "nh_flat":  {"discipline": "Jumps", "subtype": "NH Flat"},
     "bumper":   {"discipline": "Jumps", "subtype": "NH Flat"},
+    # "TYPE: Jumps" — generic jumps override without subtype
+    "jumps":    {"discipline": "Jumps", "subtype": None},
+    "national hunt": {"discipline": "Jumps", "subtype": None},
 }
 
 # Distance threshold for the distance fallback: 2m2f = 18 furlongs
@@ -261,6 +266,7 @@ def parse_racecard_header(text: str) -> dict:
         "field_size":    None,
         "race_class":    None,
         "race_type":     None,   # meeting type: Handicap / Maiden / etc.
+        "going":         None,   # raw going string (from GOING / GROUND: or GOING:)
         "ground_bucket": None,   # "Wet" | "Dry" | None — from explicit GROUND: field
     }
     if not header:
@@ -287,8 +293,16 @@ def parse_racecard_header(text: str) -> dict:
             result["race_name"] = val
         elif key == "type":
             result["race_type"] = val
+        elif "going" in key:
+            # Matches "going", "going / ground" — store raw going string and
+            # derive the Wet/Dry bucket so downstream logic gets it even when
+            # the racecard uses "GOING / GROUND: Good to Soft" instead of a
+            # separate "GROUND: Wet" line.
+            result["going"] = val
+            if result["ground_bucket"] is None:
+                result["ground_bucket"] = classify_wet_dry(val)
         elif key == "ground":
-            # Explicit GROUND: Wet / GROUND: Dry field
+            # Explicit GROUND: Wet / GROUND: Dry field — highest priority
             gb = val.strip().capitalize()
             if gb in ("Wet", "Dry"):
                 result["ground_bucket"] = gb
@@ -618,10 +632,12 @@ def parse_racecard_text(text: str) -> list:
             first_fk = FIELD_KEYS.search(rest)
             if first_fk:
                 name = rest[:first_fk.start()].strip()
-                current = {"name": name}
+                # _from_horse_header=True: keep this runner even if all other
+                # fields are blank (guided-entry mode where user leaves fields empty).
+                current = {"name": name, "_from_horse_header": True}
                 _extract_fields(current, rest[first_fk.start():])
             else:
-                current = {"name": rest}
+                current = {"name": rest, "_from_horse_header": True}
             in_prev_runs = False
             comment_pending = False
             continue
@@ -709,13 +725,18 @@ def parse_racecard_text(text: str) -> list:
     if current and "name" in current:
         runners.append(current)
 
-    # Build clean list — skip entries with ONLY a name (headers/junk)
+    # Build clean list.
+    # Runners introduced by an explicit "HORSE:" line are kept even when all
+    # other fields are blank — this supports guided/canonical-entry mode where
+    # the user may leave optional fields empty.
+    # Runners that appear only as bare name lines (freeform junk / headers) are
+    # still filtered out unless they carry at least one data field.
     cleaned = []
     for r in runners:
         if "name" not in r:
             continue
         has_data = any(k in r for k in ("age", "weight", "jockey", "trainer", "form"))
-        if not has_data:
+        if not has_data and not r.get("_from_horse_header"):
             continue
         cleaned.append({
             "name":          r["name"],
@@ -933,9 +954,9 @@ def analyze_text(request: AnalyzeTextRequest):
         )
 
     ri = request.race_info
-    # Use detected going when found; fall back to what the user supplied.
+    # Use detected going when found; fall back to header going, then user supplied.
     # Use header distance when found; fall back to what the user supplied.
-    going_str    = detected_going    if detected_going    is not None else ri.going
+    going_str    = detected_going or header_info.get("going") or ri.going or "good"
     distance_str = header_info["distance"] if header_info["distance"] is not None else ri.distance
     course_str   = header_info["course"]   if header_info["course"]   is not None else ri.course
 
@@ -1102,6 +1123,125 @@ def race_quality_text(request: RaceQualityTextRequest):
 
 class DebugParseRequest(BaseModel):
     text: str
+
+
+# ── Canonical template ────────────────────────────────────────────────────────
+# Blank template using the exact guided-entry headers.  Returned by
+# GET /canonical-template and pre-populated in the frontend's Guided Entry mode.
+# Each HORSE: block contains every supported field; blank fields are kept as-is
+# so the parser will use safe defaults.
+_CANONICAL_TEMPLATE = """\
+COURSE:
+RACE:
+TYPE:
+DISTANCE:
+RUNNERS:
+CLASS:
+GOING / GROUND:
+GROUND:
+
+HORSE:
+JOCKEY:
+TRAINER:
+FORM:
+AGE:
+WEIGHT:
+ODDS:
+EQUIPMENT:
+COMMENT:
+
+RECENT RUNS:
+
+HORSE:
+JOCKEY:
+TRAINER:
+FORM:
+AGE:
+WEIGHT:
+ODDS:
+EQUIPMENT:
+COMMENT:
+
+RECENT RUNS:
+
+HORSE:
+JOCKEY:
+TRAINER:
+FORM:
+AGE:
+WEIGHT:
+ODDS:
+EQUIPMENT:
+COMMENT:
+
+RECENT RUNS:
+
+HORSE:
+JOCKEY:
+TRAINER:
+FORM:
+AGE:
+WEIGHT:
+ODDS:
+EQUIPMENT:
+COMMENT:
+
+RECENT RUNS:
+
+HORSE:
+JOCKEY:
+TRAINER:
+FORM:
+AGE:
+WEIGHT:
+ODDS:
+EQUIPMENT:
+COMMENT:
+
+RECENT RUNS:
+
+HORSE:
+JOCKEY:
+TRAINER:
+FORM:
+AGE:
+WEIGHT:
+ODDS:
+EQUIPMENT:
+COMMENT:
+
+RECENT RUNS:
+
+HORSE:
+JOCKEY:
+TRAINER:
+FORM:
+AGE:
+WEIGHT:
+ODDS:
+EQUIPMENT:
+COMMENT:
+
+RECENT RUNS:
+
+HORSE:
+JOCKEY:
+TRAINER:
+FORM:
+AGE:
+WEIGHT:
+ODDS:
+EQUIPMENT:
+COMMENT:
+
+RECENT RUNS:
+"""
+
+
+@app.get("/canonical-template")
+def canonical_template():
+    """Return the blank guided-entry racecard template."""
+    return {"template": _CANONICAL_TEMPLATE}
 
 
 @app.post("/debug-parse")
