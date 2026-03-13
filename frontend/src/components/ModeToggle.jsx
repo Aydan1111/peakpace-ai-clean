@@ -9,12 +9,6 @@ export default function ModeToggle({ mode, onChange }) {
           Manual Entry
         </ToggleButton>
         <ToggleButton
-          active={mode === "paste"}
-          onClick={() => onChange("paste")}
-        >
-          Paste Racecard
-        </ToggleButton>
-        <ToggleButton
           active={mode === "guided"}
           onClick={() => onChange("guided")}
         >

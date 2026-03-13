@@ -2,11 +2,11 @@ import { useState, Fragment } from "react";
 
 const EMPTY_RUNNER = {
   name: "",
+  jockey: "",
+  trainer: "",
+  form: "",
   age: 4,
   weight_st: "9-4",
-  form: "",
-  trainer: "",
-  jockey: "",
   odds: "",
   equipment: "",
   comment: "",
@@ -71,12 +71,12 @@ export default function RunnerTable({ runners, onChange }) {
           <thead>
             <tr className="text-left text-xs uppercase tracking-wide text-text-dim border-b border-border">
               <th className="pb-2 pr-2">#</th>
-              <th className="pb-2 pr-2">Name</th>
+              <th className="pb-2 pr-2">HORSE</th>
+              <th className="pb-2 pr-2">Jockey</th>
+              <th className="pb-2 pr-2">Trainer</th>
+              <th className="pb-2 pr-2">Form</th>
               <th className="pb-2 pr-2">Age</th>
               <th className="pb-2 pr-2">Weight</th>
-              <th className="pb-2 pr-2">Form</th>
-              <th className="pb-2 pr-2">Trainer</th>
-              <th className="pb-2 pr-2">Jockey</th>
               <th className="pb-2 pr-2">Odds</th>
               <th className="pb-2 pr-2">Equipment</th>
               <th className="pb-2 pr-2"></th>
@@ -100,6 +100,33 @@ export default function RunnerTable({ runners, onChange }) {
                   </td>
                   <td className="py-2 pr-2">
                     <input
+                      type="text"
+                      value={r.jockey}
+                      onChange={(e) => update(i, "jockey", e.target.value)}
+                      placeholder="Jockey"
+                      className="input-compact"
+                    />
+                  </td>
+                  <td className="py-2 pr-2">
+                    <input
+                      type="text"
+                      value={r.trainer}
+                      onChange={(e) => update(i, "trainer", e.target.value)}
+                      placeholder="Trainer"
+                      className="input-compact"
+                    />
+                  </td>
+                  <td className="py-2 pr-2">
+                    <input
+                      type="text"
+                      value={r.form}
+                      onChange={(e) => update(i, "form", e.target.value)}
+                      placeholder="e.g. 1231"
+                      className="input-compact w-24"
+                    />
+                  </td>
+                  <td className="py-2 pr-2">
+                    <input
                       type="number"
                       min={2}
                       max={14}
@@ -115,33 +142,6 @@ export default function RunnerTable({ runners, onChange }) {
                       onChange={(e) => update(i, "weight_st", e.target.value)}
                       placeholder="9-0"
                       className="input-compact w-20"
-                    />
-                  </td>
-                  <td className="py-2 pr-2">
-                    <input
-                      type="text"
-                      value={r.form}
-                      onChange={(e) => update(i, "form", e.target.value)}
-                      placeholder="e.g. 1231"
-                      className="input-compact w-24"
-                    />
-                  </td>
-                  <td className="py-2 pr-2">
-                    <input
-                      type="text"
-                      value={r.trainer}
-                      onChange={(e) => update(i, "trainer", e.target.value)}
-                      placeholder="Trainer"
-                      className="input-compact"
-                    />
-                  </td>
-                  <td className="py-2 pr-2">
-                    <input
-                      type="text"
-                      value={r.jockey}
-                      onChange={(e) => update(i, "jockey", e.target.value)}
-                      placeholder="Jockey"
-                      className="input-compact"
                     />
                   </td>
                   <td className="py-2 pr-2">
@@ -172,7 +172,7 @@ export default function RunnerTable({ runners, onChange }) {
                           : "border-border text-text-dim hover:border-gold/40 hover:text-gold/70"
                       }`}
                     >
-                      {expanded[i] ? "▴ Details" : "▾ Details"}
+                      {expanded[i] ? "▴ Comment / Runs" : "▾ Comment / Runs"}
                     </button>
                   </td>
                   <td className="py-2">
@@ -230,56 +230,56 @@ export default function RunnerTable({ runners, onChange }) {
             </div>
             <div className="grid grid-cols-2 gap-3">
               <label className="col-span-2 flex flex-col gap-1">
-                <span className="text-xs text-text-dim">Name</span>
+                <span className="text-xs text-text-dim uppercase">HORSE</span>
                 <input type="text" value={r.name}
                   onChange={(e) => update(i, "name", e.target.value)}
                   placeholder="Horse name" className="input" />
               </label>
               <label className="flex flex-col gap-1">
-                <span className="text-xs text-text-dim">Age</span>
-                <input type="number" min={2} max={14} value={r.age}
-                  onChange={(e) => update(i, "age", Number(e.target.value))}
-                  className="input" />
-              </label>
-              <label className="flex flex-col gap-1">
-                <span className="text-xs text-text-dim">Weight (st-lb)</span>
-                <input type="text" value={r.weight_st}
-                  onChange={(e) => update(i, "weight_st", e.target.value)}
-                  placeholder="9-0" className="input" />
-              </label>
-              <label className="flex flex-col gap-1">
-                <span className="text-xs text-text-dim">Form</span>
-                <input type="text" value={r.form}
-                  onChange={(e) => update(i, "form", e.target.value)}
-                  placeholder="e.g. 1231" className="input" />
-              </label>
-              <label className="flex flex-col gap-1">
-                <span className="text-xs text-text-dim">Trainer</span>
-                <input type="text" value={r.trainer}
-                  onChange={(e) => update(i, "trainer", e.target.value)}
-                  className="input" />
-              </label>
-              <label className="flex flex-col gap-1">
-                <span className="text-xs text-text-dim">Jockey</span>
+                <span className="text-xs text-text-dim uppercase">Jockey</span>
                 <input type="text" value={r.jockey}
                   onChange={(e) => update(i, "jockey", e.target.value)}
                   className="input" />
               </label>
               <label className="flex flex-col gap-1">
-                <span className="text-xs text-text-dim">Odds (optional)</span>
+                <span className="text-xs text-text-dim uppercase">Trainer</span>
+                <input type="text" value={r.trainer}
+                  onChange={(e) => update(i, "trainer", e.target.value)}
+                  className="input" />
+              </label>
+              <label className="flex flex-col gap-1">
+                <span className="text-xs text-text-dim uppercase">Form</span>
+                <input type="text" value={r.form}
+                  onChange={(e) => update(i, "form", e.target.value)}
+                  placeholder="e.g. 1231" className="input" />
+              </label>
+              <label className="flex flex-col gap-1">
+                <span className="text-xs text-text-dim uppercase">Age</span>
+                <input type="number" min={2} max={14} value={r.age}
+                  onChange={(e) => update(i, "age", Number(e.target.value))}
+                  className="input" />
+              </label>
+              <label className="flex flex-col gap-1">
+                <span className="text-xs text-text-dim uppercase">Weight (st-lb)</span>
+                <input type="text" value={r.weight_st}
+                  onChange={(e) => update(i, "weight_st", e.target.value)}
+                  placeholder="9-0" className="input" />
+              </label>
+              <label className="flex flex-col gap-1">
+                <span className="text-xs text-text-dim uppercase">Odds</span>
                 <input type="text" value={r.odds || ""}
                   onChange={(e) => update(i, "odds", e.target.value)}
                   placeholder="e.g. 9/1" className="input" />
               </label>
               <label className="col-span-2 flex flex-col gap-1">
-                <span className="text-xs text-text-dim">Equipment (optional)</span>
+                <span className="text-xs text-text-dim uppercase">Equipment</span>
                 <input type="text" value={r.equipment || ""}
                   onChange={(e) => update(i, "equipment", e.target.value)}
                   placeholder="hood, cheekpieces, tongue strap…" className="input" />
               </label>
             </div>
 
-            {/* Expandable detail section on mobile */}
+            {/* Expandable COMMENT & RECENT RUNS section on mobile */}
             <div className="mt-3 pt-3 border-t border-border/30">
               <button
                 type="button"
@@ -289,8 +289,8 @@ export default function RunnerTable({ runners, onChange }) {
                 }`}
               >
                 {expanded[i]
-                  ? "▴ Hide comment & previous runs"
-                  : "▾ Add comment & previous runs"}
+                  ? "▴ Hide comment & recent runs"
+                  : "▾ Add comment & recent runs"}
               </button>
               {expanded[i] && (
                 <div className="mt-3">
@@ -311,7 +311,7 @@ export default function RunnerTable({ runners, onChange }) {
   );
 }
 
-// ── Details panel (comment + previous runs mini-table) ──────────────────────
+// ── Details panel (COMMENT + RECENT RUNS) ───────────────────────────────────
 
 function DetailsPanel({ runner, onUpdateComment, onAddPrevRun, onRemovePrevRun, onUpdatePrevRun }) {
   const prevRuns = runner.previous_runs || [];
@@ -319,10 +319,10 @@ function DetailsPanel({ runner, onUpdateComment, onAddPrevRun, onRemovePrevRun, 
   return (
     <div className="space-y-4">
 
-      {/* Analyst comment */}
+      {/* COMMENT */}
       <label className="flex flex-col gap-1">
         <span className="text-xs text-text-dim uppercase tracking-wide">
-          Analyst Comment
+          COMMENT
         </span>
         <textarea
           value={runner.comment || ""}
@@ -333,11 +333,11 @@ function DetailsPanel({ runner, onUpdateComment, onAddPrevRun, onRemovePrevRun, 
         />
       </label>
 
-      {/* Previous runs */}
+      {/* RECENT RUNS */}
       <div>
         <div className="flex items-center justify-between mb-2">
           <span className="text-xs text-text-dim uppercase tracking-wide">
-            Previous Runs
+            RECENT RUNS
           </span>
           <button
             type="button"
@@ -350,7 +350,7 @@ function DetailsPanel({ runner, onUpdateComment, onAddPrevRun, onRemovePrevRun, 
 
         {prevRuns.length === 0 ? (
           <p className="text-xs text-text-dim italic opacity-60">
-            No previous runs — click &quot;+ Add Run&quot; to add entries
+            No recent runs — click &quot;+ Add Run&quot; to add entries
           </p>
         ) : (
           <div className="overflow-x-auto">

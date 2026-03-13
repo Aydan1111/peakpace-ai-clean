@@ -226,11 +226,14 @@ function buildPrevRuns(uiRuns) {
 
 const DEFAULT_RACE = {
   course: "",
+  race_name: "",
   race_type: "flat",
-  surface: "aw",
   distance_str: "1m",
+  runners_count: "",
+  race_class: "",
   going: "not_specified",
   ground_bucket: null,
+  surface: "aw",
 };
 
 const DEFAULT_RUNNERS = [
@@ -247,7 +250,6 @@ export default function App() {
   const [inputMode, setInputMode] = useState("manual");
   const [race, setRace] = useState(DEFAULT_RACE);
   const [runners, setRunners] = useState(DEFAULT_RUNNERS);
-  const [pasteText, setPasteText] = useState("");
   // guidedText is pre-populated with the canonical template on first switch to
   // guided mode and then edited freely by the user.
   const [guidedText, setGuidedText] = useState("");
@@ -282,7 +284,6 @@ export default function App() {
     }
   };
 
-  const handlePasteChange = (val) => setPasteText(val);
   const handleGuidedChange = (val) => setGuidedText(val);
   const handleRaceChange  = (val) => setRace(val);
   const handleRunnersChange = (val) => setRunners(val);
@@ -293,13 +294,9 @@ export default function App() {
     runners.length >= 2 &&
     runners.every((r) => r.name.trim() !== "");
 
-  const canSubmitPaste  = !loading && pasteText.trim().length > 0;
   const canSubmitGuided = !loading && guidedText.trim().length > 0;
 
-  const canSubmit =
-    inputMode === "manual"  ? canSubmitManual  :
-    inputMode === "guided"  ? canSubmitGuided  :
-    canSubmitPaste;
+  const canSubmit = inputMode === "manual" ? canSubmitManual : canSubmitGuided;
 
   const analyze = async () => {
     setLoading(true);
@@ -307,8 +304,7 @@ export default function App() {
     setResult(null);
 
     try {
-      // "guided" uses the same /analyze-text backend as "paste"
-      const isTextMode = inputMode === "paste" || inputMode === "guided";
+      const isTextMode = inputMode === "guided";
       const url = isTextMode ? `${API_BASE}/analyze-text` : `${API_BASE}/analyze`;
 
       // -----------------------------------------------------------------
@@ -326,21 +322,23 @@ export default function App() {
       );
       const manualOddsPayload = Object.keys(inlineOdds).length > 0 ? inlineOdds : undefined;
 
+      // Map canonical TYPE values to backend race_type (flat vs national_hunt).
+      const backendRaceType = race.race_type === "flat" ? "flat" : "national_hunt";
+
       if (isTextMode) {
         // /analyze-text expects { race_info: {...}, racecard_text: "..." }
         // Odds come from ODDS: fields inside the pasted/guided racecard text.
-        const racecardText = inputMode === "guided" ? guidedText : pasteText;
         payload = {
           race_info: {
             course:        race.course || "Unknown",
             country:       "UK",
-            race_type:     race.race_type,
+            race_type:     backendRaceType,
             surface:       race.surface,
             distance:      normalizeDistance(race.distance_str),
             going:         race.going,
             ground_bucket: race.ground_bucket || null,
           },
-          racecard_text: racecardText,
+          racecard_text: guidedText,
           dark_horse_enabled: darkHorseEnabled,
         };
       } else {
@@ -349,7 +347,7 @@ export default function App() {
         payload = {
           course:        race.course || "Unknown",
           country:       "UK",
-          race_type:     race.race_type,
+          race_type:     backendRaceType,
           surface:       race.surface,
           distance:      normalizeDistance(race.distance_str),
           going:         race.going,
@@ -439,14 +437,12 @@ export default function App() {
               <RaceForm race={race} onChange={handleRaceChange} />
               <RunnerTable runners={runners} onChange={handleRunnersChange} />
             </>
-          ) : inputMode === "guided" ? (
+          ) : (
             <PasteInput
               value={guidedText}
               onChange={handleGuidedChange}
               mode="guided"
             />
-          ) : (
-            <PasteInput value={pasteText} onChange={handlePasteChange} mode="paste" />
           )}
 
           {/* Dark Horse Toggle */}
