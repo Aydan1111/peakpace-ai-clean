@@ -879,22 +879,28 @@ class RacingAICore:
     def _wet_jumps_adjustment(self, runner: Runner, race: RaceInfo) -> float:
         """Score multiplier applied only in Wet Jumps mode.
 
-        Modestly re-weights runners based on evidence relevant to wet,
-        attritional jumps races.  The adjustment is deliberately modest —
-        it shifts the model's ranking rather than overriding it.
+        Re-weights runners based on evidence specifically relevant to wet,
+        attritional National Hunt races.  The adjustment is deliberately
+        signal-driven: it can move an outsider with strong wet-ground evidence
+        ahead of a shorter-priced rival with no such evidence, but does not
+        blindly boost big prices.
 
-        Factors boosted (centred on 1.0 × multiplier):
-          • Proven wet-ground finishing record in previous runs
-          • High completion reliability (few falls/PUs/unseated in form)
-          • Stamina evidence (has run at current trip or further before)
+        Factors boosted:
+          • Repeated good finishes on soft/heavy/testing ground
+          • Combined wet + today's trip stamina (strongest signal)
+          • High completion reliability (few F/P/U in form string)
+          • Comment phrases: jumping accuracy, staying-on, finishing strength
 
         Factors reduced:
-          • No wet-ground history at all (genuine unknown in testing conditions)
-          • Poor completion rate (worrying for attritional ground)
+          • No wet-ground history when enough runs exist (genuine unknown)
+            — unless comment indicates clear stayer/stamina evidence
+          • Frequent non-finishers (F/P/U > 50% of form)
+          • Negative jumping / stopping comments
 
-        Returns a float multiplier (typically 0.96 – 1.05).
+        Range: approximately 0.93 – 1.15 depending on evidence stack.
         """
         prev = runner.previous_runs or []
+        cmt  = (runner.comment or "").lower()
         mult = 1.0
 
         # ── Wet-ground evidence from previous runs ───────────────────────────
@@ -909,101 +915,126 @@ class RacingAICore:
             avg_rel = statistics.mean(
                 p["pos"] / p["field_size"] for p in wet_runs
             )
-            if avg_rel <= 0.30:
+            if avg_rel <= 0.20:
+                mult *= 1.06   # dominant on wet ground — repeated top-fifth
+            elif avg_rel <= 0.30:
                 mult *= 1.04   # solid wet-ground performer
             elif avg_rel <= 0.50:
-                mult *= 1.02   # above average on wet ground
+                mult *= 1.02   # above-average on wet
             elif avg_rel >= 0.70:
-                mult *= 0.97   # consistently poor on wet ground
+                mult *= 0.96   # consistently poor on wet ground
+        elif len(wet_runs) == 1:
+            p1 = wet_runs[0]
+            rel1 = p1["pos"] / p1["field_size"]
+            if rel1 <= 0.25:
+                mult *= 1.025  # won or placed on only wet run — encouraging
+            elif rel1 >= 0.75:
+                mult *= 0.98   # ran poorly in sole wet outing
         elif len(wet_runs) == 0 and len(prev) >= 3:
-            # Has enough runs but none on wet going — genuine unknown
-            mult *= 0.97
+            # Has run enough times but never on wet ground — genuine unknown.
+            # Reduce penalty if comment indicates the horse is a stayer/stout type.
+            _STAYER_HINTS = (
+                "stayed on", "kept on", "stays well", "stout stayer",
+                "genuine stayer", "stays every yard", "stays this trip",
+                "handles cut", "handles soft",
+            )
+            if not any(h in cmt for h in _STAYER_HINTS):
+                mult *= 0.97
 
-        # ── Completion reliability ────────────────────────────────────────────
-        # Falls / PUs / Unseated / Refused are bad signals in testing conditions
-        if runner.form:
-            digits      = sum(1 for c in runner.form if c.isdigit())
-            non_finish  = sum(1 for c in runner.form.upper()
-                              if c in ("F", "P", "U", "R"))
-            total = digits + non_finish
-            if total >= 4:
-                finish_rate = digits / total
-                if finish_rate >= 0.85:
-                    mult *= 1.02   # very reliable finisher
-                elif finish_rate <= 0.50:
-                    mult *= 0.97   # frequent non-finisher — risky on testing ground
-
-        # ── Stamina evidence ─────────────────────────────────────────────────
-        # Proven at the current trip or further → modest uplift
+        # ── Combined wet-ground + trip stamina (strongest signal) ─────────────
+        # A horse that has run on wet ground AND stayed today's trip on that
+        # occasion is the clearest evidence for wet-jumps performance.
         if prev and race.distance_f > 0:
+            wet_trip_runs = [
+                p for p in prev
+                if _going_bucket(p.get("going", "")) == "soft"
+                and isinstance(p.get("distance_f"), (int, float))
+                and p["distance_f"] >= race.distance_f * 0.95
+                and isinstance(p.get("pos"), int)
+                and isinstance(p.get("field_size"), int)
+                and p["field_size"] > 1
+            ]
+            # Separately: has run at today's trip on any ground
             max_dist = max(
                 (p.get("distance_f", 0) for p in prev
                  if isinstance(p.get("distance_f"), (int, float))),
                 default=0,
             )
-            if max_dist >= race.distance_f:
-                mult *= 1.02   # has proven the stamina at this trip or further
+            if wet_trip_runs:
+                # Proven at the trip on wet going
+                wet_trip_top = sum(
+                    1 for p in wet_trip_runs
+                    if p["pos"] / p["field_size"] <= 0.30
+                )
+                if wet_trip_top >= 2:
+                    mult *= 1.05   # multiple top-third finishes at trip on wet
+                elif wet_trip_top == 1:
+                    mult *= 1.03   # one strong run at trip on wet
+                else:
+                    mult *= 1.01   # ran at trip on wet but not placed
+            elif max_dist >= race.distance_f:
+                mult *= 1.02   # has proven the trip on any ground
 
-        # ── Jumping reliability signals (comment-based, Wet Jumps only) ───────
-        # Small adjustments based on analyst/racecard comment phrases that
-        # indicate how reliably the horse jumps.  Modest ±0.01–0.02 range.
+        # ── Completion reliability ────────────────────────────────────────────
+        # Falls / PUs / Unseated / Refused are dangerous signals in testing
+        # ground — a horse that frequently doesn't finish is a bigger liability.
+        if runner.form:
+            digits     = sum(1 for c in runner.form if c.isdigit())
+            non_finish = sum(1 for c in runner.form.upper()
+                             if c in ("F", "P", "U", "R"))
+            total = digits + non_finish
+            if total >= 4:
+                finish_rate = digits / total
+                if finish_rate >= 0.85:
+                    mult *= 1.025  # very reliable finisher — valuable in testing ground
+                elif finish_rate <= 0.50:
+                    mult *= 0.96   # frequent non-finisher — higher risk on heavy going
+
+        # ── Jumping reliability (comment-based) ──────────────────────────────
         _JUMP_NEG = (
-            "made mistakes",
-            "bad mistake",
-            "not fluent",
-            "sloppy",
-            "jumped left",
-            "jumped right",
-            "sketchy jumping",
-            "error-prone",
-            "clumsy",
+            "made mistakes", "bad mistake", "not fluent", "sloppy",
+            "jumped left", "jumped right", "sketchy jumping",
+            "error-prone", "clumsy", "blundered", "serious error",
+            "put in a bad one", "hit the last", "untidy",
         )
         _JUMP_POS = (
-            "jumped well",
-            "sound jumper",
-            "accurate at obstacles",
-            "fluent jumping",
+            "jumped well", "sound jumper", "accurate at obstacles",
+            "fluent jumping", "jumping accurately", "stood up well",
+            "slick jumping", "great jump", "jumped impeccably",
+            "measured his fences", "neat at hurdles", "slick at his hurdles",
         )
-        cmt = (runner.comment or "").lower()
         if cmt:
             for phrase in _JUMP_NEG:
                 if phrase in cmt:
-                    mult *= 0.98   # unreliable jumper — extra risk on wet ground
+                    mult *= 0.97   # unreliable jumper — extra risk in testing conditions
                     break
             for phrase in _JUMP_POS:
                 if phrase in cmt:
-                    mult *= 1.015  # accurate jumper — small edge in testing conditions
+                    mult *= 1.02   # accurate jumper — a material edge on wet ground
                     break
 
-        # ── Stamina / finishing-strength signals (comment-based, Wet Jumps) ───
-        # Extra weight on phrases indicating whether the horse keeps finding
-        # under pressure — a key trait in attritional, wet jump races.
+        # ── Finishing strength / stamina (comment-based) ──────────────────────
         _STAMINA_POS = (
-            "stayed on",
-            "kept on",
-            "stayed well",
-            "plugged on",
-            "finished strongly",
-            "kept on dourly",
-            "found plenty",
+            "stayed on", "kept on", "stayed well", "plugged on",
+            "finished strongly", "kept on dourly", "found plenty",
+            "stays every yard", "stout stayer", "ran on well",
+            "keeps finding", "genuine stayer", "hit the line",
+            "never gave up", "battled on", "dug deep",
         )
         _STAMINA_NEG = (
-            "weakened approaching finish",  # check longer phrase first
-            "weakened",
-            "tired",
-            "emptied",
-            "folded quickly",
-            "faded",
-            "no extra",
+            "weakened approaching finish",   # longer phrase first
+            "weakened", "tired", "emptied", "folded quickly",
+            "faded", "no extra", "stopped quickly", "found nothing",
+            "ran flat", "no more to give",
         )
         if cmt:
             for phrase in _STAMINA_POS:
                 if phrase in cmt:
-                    mult *= 1.015  # kept finding under pressure
+                    mult *= 1.02   # keeps finding under pressure — key wet-jumps trait
                     break
             for phrase in _STAMINA_NEG:
                 if phrase in cmt:
-                    mult *= 0.98   # stopped quickly — risky in testing conditions
+                    mult *= 0.97   # stopped — a worry in attritional conditions
                     break
 
         return mult
@@ -1668,12 +1699,25 @@ class RacingAICore:
         _avg_conn  = sum(h["connections"]                for h in scored) / _n if _n else 1.0
 
         # ── Race-shape weights for Gold ───────────────────────────────────────
-        # Longer distances and soft/heavy ground reward class and stamina.
+        # Longer distances and wet/soft ground reward class and stamina.
         # Shorter distances and good/firm ground reward recent form and speed.
-        _is_long  = race.distance_f >= 12.0
-        _is_soft  = race.ground_bucket in ("Soft/Heavy",)
-        _class_wt = 0.30 if (_is_long or _is_soft) else 0.22
-        _form_wt  = 0.22 if (_is_long or _is_soft) else 0.30
+        # Wet jumps races get the strongest shift toward class because attritional
+        # conditions favour proven ability and stamina over raw recent form.
+        _is_long     = race.distance_f >= 12.0
+        _is_soft     = race.ground_bucket == "Wet"   # uses the Wet/Dry system
+        _is_wet_nh   = _is_wet_jumps(race)
+        if _is_wet_nh:
+            # Wet National Hunt: class and proven stamina dominate
+            _class_wt = 0.35
+            _form_wt  = 0.18
+        elif _is_long or _is_soft:
+            # Long flat or soft-ground race: class/stamina more important
+            _class_wt = 0.30
+            _form_wt  = 0.22
+        else:
+            # Normal flat or good-ground race: recent form drives the pick
+            _class_wt = 0.22
+            _form_wt  = 0.30
         _conn_wt  = 0.20
         _suit_wt  = 0.18
         _qual_wt  = max(0.0, 1.0 - _class_wt - _form_wt - _conn_wt - _suit_wt)
@@ -1769,19 +1813,28 @@ class RacingAICore:
                 contrast = 1.0 + dist * 0.06   # max +12% — secondary, not dominant
 
                 # (3) Market plausibility: Silver must be a realistic challenger.
-                #     A horse priced at 8× Gold's odds is not a credible main danger
-                #     regardless of how different its profile is.
-                #     Applied as a soft bonus/penalty, not a hard gate.
+                #     In wet jumps the market is less reliable — conditions can
+                #     flip form, so the price penalty starts later and is gentler.
                 if gold_dec_v > 0 and _odds_decimal:
-                    h_dec      = _odds_decimal.get(_normalize_name(h["name"]), gold_dec_v)
+                    h_dec       = _odds_decimal.get(_normalize_name(h["name"]), gold_dec_v)
                     price_ratio = h_dec / gold_dec_v
-                    if price_ratio <= 2.0:
-                        mkt_plaus = 1.06   # within 2× Gold — credible rival
-                    elif price_ratio <= 4.0:
-                        mkt_plaus = 1.02   # up to 4× — borderline credible
+                    if _is_wet_jumps(race):
+                        # Wet NH: allow credible rivals up to 3× Gold price,
+                        # soft penalty only beyond 6×
+                        if price_ratio <= 3.0:
+                            mkt_plaus = 1.06
+                        elif price_ratio <= 6.0:
+                            mkt_plaus = 1.02
+                        else:
+                            mkt_plaus = max(0.90, 1.0 - (price_ratio - 6.0) * 0.02)
                     else:
-                        # Soft penalty beyond 4×; floor at 0.85 for extreme cases
-                        mkt_plaus = max(0.85, 1.0 - (price_ratio - 4.0) * 0.04)
+                        # Normal flat / dry NH: standard plausibility
+                        if price_ratio <= 2.0:
+                            mkt_plaus = 1.06
+                        elif price_ratio <= 4.0:
+                            mkt_plaus = 1.02
+                        else:
+                            mkt_plaus = max(0.85, 1.0 - (price_ratio - 4.0) * 0.04)
                 else:
                     mkt_plaus = 1.0
 
@@ -1932,4 +1985,5 @@ class RacingAICore:
             "dark_horse":      dark,
             "race_confidence": race_confidence,
             "full_rankings":   scored,
+            "wet_jumps_mode":  _is_wet_jumps(race),
         }
