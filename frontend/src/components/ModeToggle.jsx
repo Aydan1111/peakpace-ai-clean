@@ -6,7 +6,7 @@ export default function ModeToggle({ mode, onChange }) {
           active={mode === "manual"}
           onClick={() => onChange("manual")}
         >
-          Manual Entry
+          Form Entry
         </ToggleButton>
         <ToggleButton
           active={mode === "guided"}

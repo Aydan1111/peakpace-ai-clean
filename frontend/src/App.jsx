@@ -359,7 +359,7 @@ export default function App() {
             form:             r.form.trim() || "",
             trainer:          r.trainer || "",
             jockey:           r.jockey || "",
-            draw:             null,
+            draw:             r.draw ? parseInt(r.draw, 10) : null,
             jockey_claim_lbs: 0,
             equipment:        r.equipment || "",
             comment:          r.comment   || "",
