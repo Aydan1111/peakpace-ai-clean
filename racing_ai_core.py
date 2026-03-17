@@ -42,6 +42,7 @@ class Runner:
     comment: str = ""         # analyst/Racing Post comment text
     equipment: str = ""       # equipment notes (e.g. "tongue strap", "hood removed")
     previous_runs: Optional[List[dict]] = None  # list of {going, distance_f, pos, field_size, discipline}
+    pace_style: str = ""      # "hold_up" | "midfield" | "prominent" | "leader"
 
 
 # ============================================================
@@ -467,6 +468,177 @@ _UK_JOCKEY_FALLBACK: Dict[str, float] = {
     "jack kennedy":          1.06,
     "davy russell":          1.04,
 }
+
+
+# ============================================================
+# DRAW SCORING HELPERS  (Flat races only)
+# ============================================================
+
+# Sparse draw-bias table.
+# Key: (course_key, distance_f, surface_key, runner_band)
+# Value: {"low": mult, "mid": mult, "high": mult}
+# runner_band is one of: "le7", "8_12", "13_plus"
+# Course and surface keys are lowercase-normalised.
+DRAW_BIAS: Dict[tuple, dict] = {
+    # Chester — very tight track, low draws strongly favoured at sprint-ish trips
+    ("chester", 5, "turf", "8_12"):    {"low": 1.03, "mid": 1.01, "high": 0.97},
+    ("chester", 6, "turf", "8_12"):    {"low": 1.03, "mid": 1.01, "high": 0.97},
+    ("chester", 5, "turf", "13_plus"): {"low": 1.04, "mid": 1.01, "high": 0.96},
+    # Ascot — wide track, high draw can be advantageous in big sprints
+    ("ascot",   5, "turf", "13_plus"): {"low": 0.98, "mid": 1.00, "high": 1.02},
+    ("ascot",   6, "turf", "13_plus"): {"low": 0.98, "mid": 1.01, "high": 1.01},
+    # Epsom — undulating, mid/low draws slightly favoured over 1m
+    ("epsom",   8, "turf", "8_12"):    {"low": 1.02, "mid": 1.01, "high": 0.98},
+    # Goodwood — low draws favoured over 6f in big fields
+    ("goodwood",6, "turf", "13_plus"): {"low": 1.02, "mid": 1.00, "high": 0.98},
+    # AW tracks — generally more neutral, very mild effects
+    ("kempton", 6, "aw",   "8_12"):    {"low": 1.01, "mid": 1.00, "high": 0.99},
+    ("kempton", 8, "aw",   "8_12"):    {"low": 1.01, "mid": 1.01, "high": 0.99},
+}
+
+
+def _runner_band(field_size: int) -> str:
+    """Classify field size: 'le7', '8_12', or '13_plus'."""
+    if field_size <= 7:
+        return "le7"
+    if field_size <= 12:
+        return "8_12"
+    return "13_plus"
+
+
+def _draw_position(stall: int, field_size: int) -> str:
+    """Classify raw stall into 'low', 'mid', or 'high'."""
+    if field_size <= 1:
+        return "mid"
+    ratio = (stall - 1) / (field_size - 1)   # 0.0 = stall 1, 1.0 = highest stall
+    if ratio <= 0.33:
+        return "low"
+    if ratio <= 0.67:
+        return "mid"
+    return "high"
+
+
+def _draw_multiplier(runner: Runner, race: RaceInfo) -> float:
+    """Small draw-bias multiplier for Flat races only.  Returns 1.0 otherwise."""
+    if race.discipline != "Flat":
+        return 1.0
+    if runner.draw is None:
+        return 1.0
+
+    course  = race.course.lower().strip()
+    surface = race.surface.lower().strip()
+    band    = _runner_band(race.runners)
+    key     = (course, race.distance_f, surface, band)
+
+    bias = DRAW_BIAS.get(key)
+    if bias is None:
+        return 1.0
+
+    pos  = _draw_position(runner.draw, race.runners)
+    mult = bias.get(pos, 1.0)
+    # Hard cap: ±4% max
+    return max(0.96, min(1.04, mult))
+
+
+# ============================================================
+# PACE SCORING HELPERS  (Flat races primarily)
+# ============================================================
+
+_PACE_ORDER = {"hold_up": 1, "midfield": 2, "prominent": 3, "leader": 4}
+
+
+def _pace_counts(runners: List["Runner"]) -> dict:
+    """Count runners by pace style."""
+    counts: dict = {"hold_up": 0, "midfield": 0, "prominent": 0, "leader": 0}
+    for r in runners:
+        ps = (r.pace_style or "").lower().strip()
+        if ps in counts:
+            counts[ps] += 1
+    return counts
+
+
+def _pace_shape(runners: List["Runner"]) -> str:
+    """Classify the race pace shape from the field.
+
+    Returns: 'strong' | 'controlled' | 'steady' | 'weak'
+    """
+    c = _pace_counts(runners)
+    if c["leader"] >= 2:
+        return "strong"
+    if c["leader"] == 1:
+        return "controlled"
+    if c["prominent"] >= 1:
+        return "steady"
+    return "weak"
+
+
+def _pace_multiplier(runner: Runner, runners: List["Runner"],
+                     race: RaceInfo) -> float:
+    """Small pace-context multiplier.  Flat only; ±4% max."""
+    if race.discipline != "Flat":
+        return 1.0
+    ps = (runner.pace_style or "").lower().strip()
+    if not ps or ps not in _PACE_ORDER:
+        return 1.0
+
+    shape = _pace_shape(runners)
+    delta = 0.0
+
+    if shape == "weak":
+        # Cheap pace — front runners get a small lift; closers get small penalty
+        if ps in ("leader", "prominent"):
+            delta = +0.025
+        elif ps == "hold_up":
+            delta = -0.020
+        # midfield neutral
+
+    elif shape == "strong":
+        # Hot pace — closers get a small lift; leaders may fade
+        if ps == "hold_up":
+            delta = +0.025
+        elif ps == "leader":
+            delta = -0.020
+        # prominent / midfield neutral
+
+    elif shape in ("controlled", "steady"):
+        # Only very small effects in neutral pace situations
+        if ps in ("leader", "prominent"):
+            delta = +0.010
+        elif ps == "hold_up":
+            delta = -0.010
+
+    return max(0.96, min(1.04, 1.0 + delta))
+
+
+# ============================================================
+# DRAW + PACE COMBINATION MULTIPLIER  (Flat only)
+# ============================================================
+
+def _draw_pace_combo_multiplier(runner: Runner, runners: List["Runner"],
+                                race: RaceInfo) -> float:
+    """Tiny interaction between draw and pace style.  Flat only; ±3% max."""
+    if race.discipline != "Flat":
+        return 1.0
+    if runner.draw is None:
+        return 1.0
+
+    ps    = (runner.pace_style or "").lower().strip()
+    shape = _pace_shape(runners)
+    pos   = _draw_position(runner.draw, race.runners)
+
+    delta = 0.0
+
+    if shape == "weak":
+        # Weak pace rewards front-running from a good draw
+        if pos == "low" and ps in ("leader", "prominent", "midfield"):
+            delta = +0.020
+        elif pos == "high" and ps == "hold_up":
+            delta = -0.015
+
+    # Strong pace handled by _pace_multiplier; no additional combo signal here
+    # Controlled / steady: neutral
+
+    return max(0.97, min(1.03, 1.0 + delta))
 
 
 # ============================================================
@@ -1513,6 +1685,12 @@ class RacingAICore:
                     rc_mult = max(0.92, min(1.08,
                                            1.0 + rc_edge * (1.0 + (0.5 - coverage))))
                 final_score *= rc_mult
+
+            # ── Draw / Pace signals (Flat races; secondary contextual layer) ──
+            draw_mult  = _draw_multiplier(r, race)
+            pace_mult  = _pace_multiplier(r, runners, race)
+            combo_mult = _draw_pace_combo_multiplier(r, runners, race)
+            final_score *= draw_mult * pace_mult * combo_mult
 
             # ── Odds: confidence layer only — score is never touched ─────────
             # Odds are applied AFTER sorting as a confidence corroboration
