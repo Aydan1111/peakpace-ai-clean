@@ -1,4 +1,4 @@
-import { useState, Fragment } from "react";
+import { useState } from "react";
 
 const EMPTY_RUNNER = {
   name: "",
@@ -7,11 +7,21 @@ const EMPTY_RUNNER = {
   form: "",
   age: 4,
   weight_st: "9-4",
+  draw: "",
+  pace: "",
   odds: "",
   equipment: "",
   comment: "",
   previous_runs: [],
 };
+
+const PACE_OPTIONS = [
+  { value: "",          label: "— select —" },
+  { value: "HOLD_UP",   label: "Hold Up" },
+  { value: "MIDFIELD",  label: "Midfield" },
+  { value: "PROMINENT", label: "Prominent" },
+  { value: "LEADER",    label: "Leader" },
+];
 
 const EMPTY_PREV_RUN = {
   distance: "",
@@ -58,228 +68,144 @@ export default function RunnerTable({ runners, onChange }) {
     <section className="bg-surface rounded-xl border border-border p-6">
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-lg font-semibold text-gold">
-          Runners ({runners.length})
+          Horses ({runners.length})
         </h2>
         <button type="button" onClick={addRunner} className="btn-secondary text-sm">
-          + Add Runner
+          + Add Horse
         </button>
       </div>
 
-      {/* ── Desktop table ─────────────────────────────────────────────────── */}
-      <div className="hidden md:block overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="text-left text-xs uppercase tracking-wide text-text-dim border-b border-border">
-              <th className="pb-2 pr-2">#</th>
-              <th className="pb-2 pr-2">HORSE</th>
-              <th className="pb-2 pr-2">Jockey</th>
-              <th className="pb-2 pr-2">Trainer</th>
-              <th className="pb-2 pr-2">Form</th>
-              <th className="pb-2 pr-2">Age</th>
-              <th className="pb-2 pr-2">Weight</th>
-              <th className="pb-2 pr-2">Odds</th>
-              <th className="pb-2 pr-2">Equipment</th>
-              <th className="pb-2 pr-2"></th>
-              <th className="pb-2"></th>
-            </tr>
-          </thead>
-          <tbody>
-            {runners.map((r, i) => (
-              <Fragment key={i}>
-                {/* Main row */}
-                <tr className={expanded[i] ? "" : "border-b border-border/50"}>
-                  <td className="py-2 pr-2 text-text-dim">{i + 1}</td>
-                  <td className="py-2 pr-2">
-                    <input
-                      type="text"
-                      value={r.name}
-                      onChange={(e) => update(i, "name", e.target.value)}
-                      placeholder="Horse name"
-                      className="input-compact"
-                    />
-                  </td>
-                  <td className="py-2 pr-2">
-                    <input
-                      type="text"
-                      value={r.jockey}
-                      onChange={(e) => update(i, "jockey", e.target.value)}
-                      placeholder="Jockey"
-                      className="input-compact"
-                    />
-                  </td>
-                  <td className="py-2 pr-2">
-                    <input
-                      type="text"
-                      value={r.trainer}
-                      onChange={(e) => update(i, "trainer", e.target.value)}
-                      placeholder="Trainer"
-                      className="input-compact"
-                    />
-                  </td>
-                  <td className="py-2 pr-2">
-                    <input
-                      type="text"
-                      value={r.form}
-                      onChange={(e) => update(i, "form", e.target.value)}
-                      placeholder="e.g. 1231"
-                      className="input-compact w-24"
-                    />
-                  </td>
-                  <td className="py-2 pr-2">
-                    <input
-                      type="number"
-                      min={2}
-                      max={14}
-                      value={r.age}
-                      onChange={(e) => update(i, "age", Number(e.target.value))}
-                      className="input-compact w-16"
-                    />
-                  </td>
-                  <td className="py-2 pr-2">
-                    <input
-                      type="text"
-                      value={r.weight_st}
-                      onChange={(e) => update(i, "weight_st", e.target.value)}
-                      placeholder="9-0"
-                      className="input-compact w-20"
-                    />
-                  </td>
-                  <td className="py-2 pr-2">
-                    <input
-                      type="text"
-                      value={r.odds || ""}
-                      onChange={(e) => update(i, "odds", e.target.value)}
-                      placeholder="e.g. 9/1"
-                      className="input-compact w-20"
-                    />
-                  </td>
-                  <td className="py-2 pr-2">
-                    <input
-                      type="text"
-                      value={r.equipment || ""}
-                      onChange={(e) => update(i, "equipment", e.target.value)}
-                      placeholder="hood, cheekpieces…"
-                      className="input-compact w-32"
-                    />
-                  </td>
-                  <td className="py-2 pr-2">
-                    <button
-                      type="button"
-                      onClick={() => toggleExpand(i)}
-                      className={`text-xs px-2 py-1 rounded border transition-colors whitespace-nowrap ${
-                        expanded[i]
-                          ? "border-gold/60 text-gold bg-gold/10"
-                          : "border-border text-text-dim hover:border-gold/40 hover:text-gold/70"
-                      }`}
-                    >
-                      {expanded[i] ? "▴ Comment / Runs" : "▾ Comment / Runs"}
-                    </button>
-                  </td>
-                  <td className="py-2">
-                    <button
-                      type="button"
-                      onClick={() => removeRunner(i)}
-                      disabled={runners.length <= 2}
-                      className="text-text-dim hover:text-red-400 disabled:opacity-30 disabled:cursor-not-allowed transition-colors px-1"
-                      title="Remove runner"
-                    >
-                      &times;
-                    </button>
-                  </td>
-                </tr>
-
-                {/* Details panel row */}
-                {expanded[i] && (
-                  <tr className="border-b border-border/50">
-                    <td colSpan={10} className="pb-4 pt-1 pl-6 pr-2">
-                      <DetailsPanel
-                        runner={r}
-                        onUpdateComment={(v) => update(i, "comment", v)}
-                        onAddPrevRun={() => addPrevRun(i)}
-                        onRemovePrevRun={(ri) => removePrevRun(i, ri)}
-                        onUpdatePrevRun={(ri, f, v) => updatePrevRun(i, ri, f, v)}
-                      />
-                    </td>
-                  </tr>
-                )}
-              </Fragment>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      {/* ── Mobile cards ──────────────────────────────────────────────────── */}
-      <div className="md:hidden flex flex-col gap-4">
+      <div className="flex flex-col gap-4">
         {runners.map((r, i) => (
           <div
             key={i}
             className="bg-surface-light rounded-lg border border-border/50 p-4"
           >
+            {/* Card header */}
             <div className="flex items-center justify-between mb-3">
-              <span className="text-xs font-medium text-text-dim">
-                Runner {i + 1}
+              <span className="text-xs font-semibold text-gold uppercase tracking-wide">
+                Horse {i + 1}
               </span>
               <button
                 type="button"
                 onClick={() => removeRunner(i)}
                 disabled={runners.length <= 2}
-                className="text-xs text-text-dim hover:text-red-400 disabled:opacity-30 disabled:cursor-not-allowed"
+                className="text-xs text-text-dim hover:text-red-400 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
               >
                 Remove
               </button>
             </div>
-            <div className="grid grid-cols-2 gap-3">
-              <label className="col-span-2 flex flex-col gap-1">
-                <span className="text-xs text-text-dim uppercase">HORSE</span>
-                <input type="text" value={r.name}
+
+            {/* Main fields grid */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+
+              <CardField label="HORSE" className="col-span-2 sm:col-span-2 lg:col-span-2">
+                <input
+                  type="text"
+                  value={r.name}
                   onChange={(e) => update(i, "name", e.target.value)}
-                  placeholder="Horse name" className="input" />
-              </label>
-              <label className="flex flex-col gap-1">
-                <span className="text-xs text-text-dim uppercase">Jockey</span>
-                <input type="text" value={r.jockey}
+                  placeholder="Horse name"
+                  className="input"
+                />
+              </CardField>
+
+              <CardField label="JOCKEY">
+                <input
+                  type="text"
+                  value={r.jockey}
                   onChange={(e) => update(i, "jockey", e.target.value)}
-                  className="input" />
-              </label>
-              <label className="flex flex-col gap-1">
-                <span className="text-xs text-text-dim uppercase">Trainer</span>
-                <input type="text" value={r.trainer}
+                  className="input"
+                />
+              </CardField>
+
+              <CardField label="TRAINER">
+                <input
+                  type="text"
+                  value={r.trainer}
                   onChange={(e) => update(i, "trainer", e.target.value)}
-                  className="input" />
-              </label>
-              <label className="flex flex-col gap-1">
-                <span className="text-xs text-text-dim uppercase">Form</span>
-                <input type="text" value={r.form}
+                  className="input"
+                />
+              </CardField>
+
+              <CardField label="FORM">
+                <input
+                  type="text"
+                  value={r.form}
                   onChange={(e) => update(i, "form", e.target.value)}
-                  placeholder="e.g. 1231" className="input" />
-              </label>
-              <label className="flex flex-col gap-1">
-                <span className="text-xs text-text-dim uppercase">Age</span>
-                <input type="number" min={2} max={14} value={r.age}
+                  placeholder="e.g. 1231"
+                  className="input"
+                />
+              </CardField>
+
+              <CardField label="AGE">
+                <input
+                  type="number"
+                  min={2}
+                  max={14}
+                  value={r.age}
                   onChange={(e) => update(i, "age", Number(e.target.value))}
-                  className="input" />
-              </label>
-              <label className="flex flex-col gap-1">
-                <span className="text-xs text-text-dim uppercase">Weight (st-lb)</span>
-                <input type="text" value={r.weight_st}
+                  className="input"
+                />
+              </CardField>
+
+              <CardField label="WEIGHT (st-lb)">
+                <input
+                  type="text"
+                  value={r.weight_st}
                   onChange={(e) => update(i, "weight_st", e.target.value)}
-                  placeholder="9-0" className="input" />
-              </label>
-              <label className="flex flex-col gap-1">
-                <span className="text-xs text-text-dim uppercase">Odds</span>
-                <input type="text" value={r.odds || ""}
+                  placeholder="9-0"
+                  className="input"
+                />
+              </CardField>
+
+              <CardField label="DRAW">
+                <input
+                  type="number"
+                  min={1}
+                  value={r.draw || ""}
+                  onChange={(e) => update(i, "draw", e.target.value)}
+                  placeholder="—"
+                  className="input"
+                />
+              </CardField>
+
+              <CardField label="PACE">
+                <select
+                  value={r.pace || ""}
+                  onChange={(e) => update(i, "pace", e.target.value)}
+                  className="input"
+                >
+                  {PACE_OPTIONS.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+              </CardField>
+
+              <CardField label="ODDS">
+                <input
+                  type="text"
+                  value={r.odds || ""}
                   onChange={(e) => update(i, "odds", e.target.value)}
-                  placeholder="e.g. 9/1" className="input" />
-              </label>
-              <label className="col-span-2 flex flex-col gap-1">
-                <span className="text-xs text-text-dim uppercase">Equipment</span>
-                <input type="text" value={r.equipment || ""}
+                  placeholder="e.g. 9/1"
+                  className="input"
+                />
+              </CardField>
+
+              <CardField label="EQUIPMENT" className="col-span-2">
+                <input
+                  type="text"
+                  value={r.equipment || ""}
                   onChange={(e) => update(i, "equipment", e.target.value)}
-                  placeholder="hood, cheekpieces, tongue strap…" className="input" />
-              </label>
+                  placeholder="hood, cheekpieces, tongue strap…"
+                  className="input"
+                />
+              </CardField>
+
             </div>
 
-            {/* Expandable COMMENT & RECENT RUNS section on mobile */}
+            {/* Comment & Recent Runs (expandable) */}
             <div className="mt-3 pt-3 border-t border-border/30">
               <button
                 type="button"
@@ -311,7 +237,18 @@ export default function RunnerTable({ runners, onChange }) {
   );
 }
 
-// ── Details panel (COMMENT + RECENT RUNS) ───────────────────────────────────
+function CardField({ label, children, className = "" }) {
+  return (
+    <label className={`flex flex-col gap-1 ${className}`}>
+      <span className="text-xs font-medium uppercase tracking-wide text-text-dim">
+        {label}
+      </span>
+      {children}
+    </label>
+  );
+}
+
+// ── Details panel (COMMENT + RECENT RUNS) ────────────────────────────────────
 
 function DetailsPanel({ runner, onUpdateComment, onAddPrevRun, onRemovePrevRun, onUpdatePrevRun }) {
   const prevRuns = runner.previous_runs || [];

@@ -352,19 +352,28 @@ export default function App() {
           distance:      normalizeDistance(race.distance_str),
           going:         race.going,
           ground_bucket: race.ground_bucket || null,
-          runners: runners.map((r) => ({
-            name:             r.name,
-            age:              r.age || 4,
-            weight:           normalizeWeight(r.weight_st),
-            form:             r.form.trim() || "",
-            trainer:          r.trainer || "",
-            jockey:           r.jockey || "",
-            draw:             null,
-            jockey_claim_lbs: 0,
-            equipment:        r.equipment || "",
-            comment:          r.comment   || "",
-            previous_runs:    buildPrevRuns(r.previous_runs),
-          })),
+          runners: runners.map((r) => {
+            const paceMap = {
+              "HOLD_UP":   "hold_up",
+              "MIDFIELD":  "midfield",
+              "PROMINENT": "prominent",
+              "LEADER":    "leader",
+            };
+            return {
+              name:             r.name,
+              age:              r.age || 4,
+              weight:           normalizeWeight(r.weight_st),
+              form:             r.form.trim() || "",
+              trainer:          r.trainer || "",
+              jockey:           r.jockey || "",
+              draw:             r.draw ? parseInt(r.draw, 10) : null,
+              jockey_claim_lbs: 0,
+              equipment:        r.equipment || "",
+              comment:          r.comment   || "",
+              previous_runs:    buildPrevRuns(r.previous_runs),
+              pace_style:       paceMap[r.pace] || null,
+            };
+          }),
           odds: manualOddsPayload,
           dark_horse_enabled: darkHorseEnabled,
         };

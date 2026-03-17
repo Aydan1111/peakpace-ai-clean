@@ -88,6 +88,7 @@ class RunnerInput(BaseModel):
     comment: Optional[str] = ""
     equipment: Optional[str] = ""
     previous_runs: Optional[List[dict]] = None
+    pace_style: Optional[str] = None
 
 
 class AnalyzeRequest(BaseModel):
@@ -835,6 +836,7 @@ def analyze(request: AnalyzeRequest):
                 comment=r.comment or "",
                 equipment=r.equipment or "",
                 previous_runs=r.previous_runs,
+                pace_style=r.pace_style or "",
             )
         )
 
