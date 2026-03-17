@@ -2533,6 +2533,20 @@ class RacingAICore:
                 for f in _temp:
                     pick.pop(f, None)
 
+        # ── Display-confidence normalization (Gold > Silver > Dark Horse) ──────
+        # Only adjusts the final displayed value; does not affect pick selection,
+        # horse ranking, or race confidence logic.
+        if gold and silver:
+            if silver["confidence"] >= gold["confidence"]:
+                silver["confidence"] = max(70, gold["confidence"] - 1)
+        if silver and dark:
+            if dark["confidence"] >= silver["confidence"]:
+                dark["confidence"] = max(70, silver["confidence"] - 1)
+        if gold and dark:
+            if dark["confidence"] >= gold["confidence"]:
+                dark["confidence"] = max(70, gold["confidence"] - 2)
+        # ────────────────────────────────────────────────────────────────────
+
         return {
             "gold_pick":       gold,
             "silver_pick":     silver,
