@@ -77,7 +77,7 @@ export default function ResultsPanel({ result }) {
               </div>
               <p className="text-lg font-semibold">{p.name}</p>
               <p className="text-gold text-sm font-medium mt-1">
-                {p.model_alignment} alignment
+                {p.model_alignment} confidence
               </p>
               {p.writeup && (
                 <p className="text-text-dim text-xs mt-2 leading-relaxed italic border-t border-border/30 pt-2">
