@@ -3,6 +3,12 @@ export default function ModeToggle({ mode, onChange }) {
     <div className="flex justify-center">
       <div className="inline-flex rounded-lg border border-border bg-surface p-1 gap-1">
         <ToggleButton
+          active={mode === "precheck"}
+          onClick={() => onChange("precheck")}
+        >
+          Race Pre-Check
+        </ToggleButton>
+        <ToggleButton
           active={mode === "manual"}
           onClick={() => onChange("manual")}
         >

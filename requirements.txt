@@ -4,3 +4,4 @@ pydantic
 numpy
 pandas
 python-multipart
+anthropic
