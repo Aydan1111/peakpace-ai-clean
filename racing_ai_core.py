@@ -2534,17 +2534,33 @@ class RacingAICore:
                     pick.pop(f, None)
 
         # ── Display-confidence normalization (Gold > Silver > Dark Horse) ──────
-        # Only adjusts the final displayed value; does not affect pick selection,
+        # Only adjusts final displayed values; does not affect pick selection,
         # horse ranking, or race confidence logic.
-        if gold and silver:
-            if silver["confidence"] >= gold["confidence"]:
-                silver["confidence"] = max(70, gold["confidence"] - 1)
-        if silver and dark:
-            if dark["confidence"] >= silver["confidence"]:
-                dark["confidence"] = max(70, silver["confidence"] - 1)
-        if gold and dark:
-            if dark["confidence"] >= gold["confidence"]:
-                dark["confidence"] = max(70, gold["confidence"] - 2)
+        if gold and silver and dark:
+            g = max(gold["confidence"], 72)
+            s = min(silver["confidence"], g - 1)
+            s = max(71, s)
+            g = max(g, s + 1)
+            d = min(dark["confidence"], s - 1)
+            d = max(70, d)
+            if d >= s:
+                s = min(94, max(71, d + 1))
+                g = min(95, max(g, s + 1))
+            gold["confidence"], silver["confidence"], dark["confidence"] = g, s, d
+        elif gold and silver:
+            g = max(gold["confidence"], 71)
+            s = min(silver["confidence"], g - 1)
+            s = max(70, s)
+            if s >= g:
+                g = min(95, max(g, s + 1))
+            gold["confidence"], silver["confidence"] = g, s
+        elif gold and dark:
+            g = max(gold["confidence"], 71)
+            d = min(dark["confidence"], g - 1)
+            d = max(70, d)
+            if d >= g:
+                g = min(95, max(g, d + 1))
+            gold["confidence"], dark["confidence"] = g, d
         # ────────────────────────────────────────────────────────────────────
 
         return {
