@@ -3,6 +3,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional, Dict
 import re
+import os
+import base64
 from racing_ai_core import RacingAICore, RaceInfo, Runner, classify_wet_dry
 
 app = FastAPI(title="PeakPace AI")
@@ -1295,6 +1297,122 @@ RECENT RUNS:
 def canonical_template():
     """Return the blank guided-entry racecard template."""
     return {"template": _CANONICAL_TEMPLATE}
+
+
+# -------------------------------------------------
+# RACE PRE-CHECK — screenshot-based triage tool
+# -------------------------------------------------
+
+class RacePrecheckRequest(BaseModel):
+    main_screenshot: str       # base64-encoded image data (without data-URL prefix)
+    draw_pace_screenshot: str  # base64-encoded image data (without data-URL prefix)
+    main_media_type: str = "image/png"       # e.g. "image/png" or "image/jpeg"
+    draw_pace_media_type: str = "image/png"
+
+
+@app.post("/race-precheck")
+def race_precheck(request: RacePrecheckRequest):
+    """
+    Broad triage tool: given two screenshots (main race + ATR draw/pace),
+    returns precheck_confidence (HIGH / MEDIUM / LOW) and a short_reason.
+    Does NOT predict winners or output Gold/Silver/Dark Horse picks.
+    """
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        raise HTTPException(
+            status_code=503,
+            detail="Race Pre-Check is unavailable: ANTHROPIC_API_KEY not configured on server.",
+        )
+
+    try:
+        import anthropic as _anthropic
+    except ImportError:
+        raise HTTPException(
+            status_code=503,
+            detail="Race Pre-Check is unavailable: anthropic package not installed.",
+        )
+
+    client = _anthropic.Anthropic(api_key=api_key)
+
+    prompt = (
+        "You are a horse racing triage assistant. "
+        "You have been given two screenshots: "
+        "(1) the main race market screen showing odds, field size, race type, prices, and general race structure; "
+        "(2) the ATR draw and pace setup screen.\n\n"
+        "Your task is to give a BROAD PRE-CHECK only. "
+        "DO NOT try to pick a winner. DO NOT output Gold/Silver/Dark Horse picks. "
+        "DO NOT do deep horse-by-horse analysis.\n\n"
+        "Judge only at a glance using these signals:\n"
+        "- Field size (fewer runners = clearer)\n"
+        "- Market openness (tight clear favourite vs wide open market)\n"
+        "- Strength / confidence of the favourite's price\n"
+        "- Race type volatility (handicap vs conditions race etc.)\n"
+        "- Draw shape from the ATR screen (favoured draw visible or not)\n"
+        "- Pace setup (clear pace scenario or chaotic)\n"
+        "- Whether the race looks generally clear or messy overall\n\n"
+        "Return ONLY a valid JSON object with exactly these two keys:\n"
+        '{ "precheck_confidence": "HIGH" | "MEDIUM" | "LOW", "short_reason": "<one sentence>" }\n\n'
+        "Meanings:\n"
+        "HIGH = clear enough market and race shape for deeper analysis\n"
+        "MEDIUM = some structure but not especially clear\n"
+        "LOW = too open, tactically messy, or too little to read confidently\n\n"
+        "Do not include any other text outside the JSON object."
+    )
+
+    message = client.messages.create(
+        model="claude-sonnet-4-6",
+        max_tokens=200,
+        messages=[
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": request.main_media_type,
+                            "data": request.main_screenshot,
+                        },
+                    },
+                    {
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": request.draw_pace_media_type,
+                            "data": request.draw_pace_screenshot,
+                        },
+                    },
+                    {"type": "text", "text": prompt},
+                ],
+            }
+        ],
+    )
+
+    raw = message.content[0].text.strip()
+
+    # Extract JSON from the response
+    import json as _json
+    json_match = re.search(r"\{[^}]+\}", raw, re.DOTALL)
+    if not json_match:
+        raise HTTPException(status_code=502, detail=f"Unexpected model response: {raw[:200]}")
+
+    try:
+        parsed = _json.loads(json_match.group())
+    except _json.JSONDecodeError:
+        raise HTTPException(status_code=502, detail=f"Could not parse model JSON: {raw[:200]}")
+
+    confidence = str(parsed.get("precheck_confidence", "")).upper()
+    if confidence not in ("HIGH", "MEDIUM", "LOW"):
+        confidence = "MEDIUM"
+
+    short_reason = str(parsed.get("short_reason", "")).strip()
+    if not short_reason:
+        short_reason = "Unable to determine race quality from screenshots."
+
+    return {
+        "precheck_confidence": confidence,
+        "short_reason": short_reason,
+    }
 
 
 @app.post("/debug-parse")

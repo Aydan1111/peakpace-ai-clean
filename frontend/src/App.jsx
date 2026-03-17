@@ -5,6 +5,7 @@ import RunnerTable from "./components/RunnerTable";
 import PasteInput from "./components/PasteInput";
 import ResultsPanel from "./components/ResultsPanel";
 import Spinner from "./components/Spinner";
+import RacePreCheck from "./components/RacePreCheck";
 
 /*
   CLEAN PRODUCTION API SETUP
@@ -261,6 +262,13 @@ export default function App() {
   // Dark horse toggle — off by default; Gold + Silver only when false
   const [darkHorseEnabled, setDarkHorseEnabled] = useState(false);
 
+  // Race Pre-Check state — isolated from main analysis state
+  const [precheckMainShot, setPrecheckMainShot] = useState(null);
+  const [precheckDrawShot, setPrecheckDrawShot] = useState(null);
+  const [precheckResult, setPrecheckResult] = useState(null);
+  const [precheckLoading, setPrecheckLoading] = useState(false);
+  const [precheckError, setPrecheckError] = useState(null);
+
   // When switching to guided mode for the first time, fetch and pre-populate
   // the canonical template from the backend.
   const handleModeChange = (newMode) => {
@@ -287,6 +295,46 @@ export default function App() {
   const handleGuidedChange = (val) => setGuidedText(val);
   const handleRaceChange  = (val) => setRace(val);
   const handleRunnersChange = (val) => setRunners(val);
+
+  // Strip the "data:image/...;base64," prefix from a data-URL to get raw base64
+  const stripDataPrefix = (dataUrl) => {
+    const idx = dataUrl.indexOf(",");
+    return idx >= 0 ? dataUrl.slice(idx + 1) : dataUrl;
+  };
+
+  const runPrecheck = async () => {
+    if (!precheckMainShot || !precheckDrawShot) return;
+    setPrecheckLoading(true);
+    setPrecheckError(null);
+    setPrecheckResult(null);
+    try {
+      const payload = {
+        main_screenshot:       stripDataPrefix(precheckMainShot.preview),
+        draw_pace_screenshot:  stripDataPrefix(precheckDrawShot.preview),
+        main_media_type:       precheckMainShot.mediaType || "image/png",
+        draw_pace_media_type:  precheckDrawShot.mediaType  || "image/png",
+      };
+      const res = await fetch(`${API_BASE}/race-precheck`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) {
+        const raw = await res.text().catch(() => "");
+        throw new Error(extractErrorMsg(raw, res.status));
+      }
+      const data = await res.json();
+      setPrecheckResult(data);
+    } catch (err) {
+      if (err instanceof TypeError && err.message === "Failed to fetch") {
+        setPrecheckError("Cannot reach backend — check API URL or CORS.");
+      } else {
+        setPrecheckError(err.message || "Pre-check request failed");
+      }
+    } finally {
+      setPrecheckLoading(false);
+    }
+  };
 
   // Only require horse name + at least 2 runners for manual mode.
   const canSubmitManual =
@@ -441,7 +489,18 @@ export default function App() {
 
           <ModeToggle mode={inputMode} onChange={handleModeChange} />
 
-          {inputMode === "manual" ? (
+          {inputMode === "precheck" ? (
+            <RacePreCheck
+              mainShot={precheckMainShot}
+              drawShot={precheckDrawShot}
+              onMainChange={setPrecheckMainShot}
+              onDrawChange={setPrecheckDrawShot}
+              onRun={runPrecheck}
+              loading={precheckLoading}
+              result={precheckResult}
+              error={precheckError}
+            />
+          ) : inputMode === "manual" ? (
             <>
               <RaceForm race={race} onChange={handleRaceChange} />
               <RunnerTable runners={runners} onChange={handleRunnersChange} />
@@ -454,53 +513,57 @@ export default function App() {
             />
           )}
 
-          {/* Dark Horse Toggle */}
-          <div className="flex justify-center">
-            <label className="flex items-center gap-3 cursor-pointer select-none group">
-              {/* Track */}
-              <span
-                onClick={() => setDarkHorseEnabled((v) => !v)}
-                className={`relative inline-flex h-6 w-11 shrink-0 rounded-full border-2 transition-colors duration-200 ${
-                  darkHorseEnabled
-                    ? "border-purple-500 bg-purple-500/30"
-                    : "border-border bg-surface-light"
-                }`}
-              >
-                {/* Thumb */}
-                <span
-                  className={`inline-block h-4 w-4 mt-0.5 rounded-full shadow transition-transform duration-200 ${
-                    darkHorseEnabled
-                      ? "translate-x-5 bg-purple-400"
-                      : "translate-x-0.5 bg-text-dim"
-                  }`}
-                />
-              </span>
-              <span className={`text-sm font-medium transition-colors ${darkHorseEnabled ? "text-purple-300" : "text-text-dim"}`}>
-                Enable Dark Horse Pick
-              </span>
-            </label>
-          </div>
+          {/* Dark Horse Toggle + Analyze button — hidden in precheck mode */}
+          {inputMode !== "precheck" && (
+            <>
+              <div className="flex justify-center">
+                <label className="flex items-center gap-3 cursor-pointer select-none group">
+                  {/* Track */}
+                  <span
+                    onClick={() => setDarkHorseEnabled((v) => !v)}
+                    className={`relative inline-flex h-6 w-11 shrink-0 rounded-full border-2 transition-colors duration-200 ${
+                      darkHorseEnabled
+                        ? "border-purple-500 bg-purple-500/30"
+                        : "border-border bg-surface-light"
+                    }`}
+                  >
+                    {/* Thumb */}
+                    <span
+                      className={`inline-block h-4 w-4 mt-0.5 rounded-full shadow transition-transform duration-200 ${
+                        darkHorseEnabled
+                          ? "translate-x-5 bg-purple-400"
+                          : "translate-x-0.5 bg-text-dim"
+                      }`}
+                    />
+                  </span>
+                  <span className={`text-sm font-medium transition-colors ${darkHorseEnabled ? "text-purple-300" : "text-text-dim"}`}>
+                    Enable Dark Horse Pick
+                  </span>
+                </label>
+              </div>
 
-          <div className="flex justify-center gap-3">
-            <button
-              type="button"
-              disabled={!canSubmit}
-              onClick={analyze}
-              className="btn-primary text-base px-10 py-3"
-            >
-              {loading ? "Analyzing…" : "Analyze Race"}
-            </button>
-          </div>
+              <div className="flex justify-center gap-3">
+                <button
+                  type="button"
+                  disabled={!canSubmit}
+                  onClick={analyze}
+                  className="btn-primary text-base px-10 py-3"
+                >
+                  {loading ? "Analyzing…" : "Analyze Race"}
+                </button>
+              </div>
 
-          {error && (
-            <div className="bg-red-500/10 border border-red-500/40 rounded-lg p-4 text-red-400 text-sm text-center">
-              {error}
-            </div>
+              {error && (
+                <div className="bg-red-500/10 border border-red-500/40 rounded-lg p-4 text-red-400 text-sm text-center">
+                  {error}
+                </div>
+              )}
+
+              {loading && <Spinner />}
+
+              <ResultsPanel result={result} />
+            </>
           )}
-
-          {loading && <Spinner />}
-
-          <ResultsPanel result={result} />
         </div>
       </div>
     </div>
