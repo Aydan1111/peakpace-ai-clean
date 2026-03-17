@@ -431,19 +431,19 @@ FIELD_KEYS = re.compile(
 def _normalize_pace(raw: str) -> str:
     """Normalize raw PACE: value to snake_case.
 
-    Accepts: HOLD UP, hold-up, hold_up, MIDFIELD, PROMINENT, LEADER, etc.
+    Normalizes separators first (dashes and underscores → space), then matches.
+    Accepts: hold up / held up / hold-up / hold_up / MIDFIELD / PROMINENT /
+             LEADER / front runner / make all / up with pace.
     Returns a canonical value or "" when unrecognised.
     """
     s = raw.lower().strip().replace("-", " ").replace("_", " ")
-    if s in ("hold up", "hold up style"):
-        return "hold_up"
-    if s in ("hold_up",):
+    if s in ("hold up", "held up", "hold up style"):
         return "hold_up"
     if s == "midfield":
         return "midfield"
     if s in ("prominent", "up with pace"):
         return "prominent"
-    if s in ("leader", "make all", "front runner", "front-runner"):
+    if s in ("leader", "make all", "front runner"):
         return "leader"
     return ""
 
