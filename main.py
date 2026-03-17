@@ -424,8 +424,28 @@ def _discipline_from_race_type(race_type: str) -> dict:
 # -------------------------------------------------
 
 FIELD_KEYS = re.compile(
-    r"(Age|Weight|Trainer|Jockey|Form|F|Odds|Comment|Equipment)\s*:", re.I
+    r"(Age|Weight|Trainer|Jockey|Form|F|Odds|Comment|Equipment|Draw|Pace)\s*:", re.I
 )
+
+
+def _normalize_pace(raw: str) -> str:
+    """Normalize raw PACE: value to snake_case.
+
+    Accepts: HOLD UP, hold-up, hold_up, MIDFIELD, PROMINENT, LEADER, etc.
+    Returns a canonical value or "" when unrecognised.
+    """
+    s = raw.lower().strip().replace("-", " ").replace("_", " ")
+    if s in ("hold up", "hold up style"):
+        return "hold_up"
+    if s in ("hold_up",):
+        return "hold_up"
+    if s == "midfield":
+        return "midfield"
+    if s in ("prominent", "up with pace"):
+        return "prominent"
+    if s in ("leader", "make all", "front runner", "front-runner"):
+        return "leader"
+    return ""
 
 # Words that can appear directly before a field key but are NOT horse names.
 # e.g. "Recent Form: 123" — "Recent" must not become a runner.
@@ -480,6 +500,17 @@ def _extract_fields(current: dict, text: str):
         m = re.search(r"equipment[:\s]+(.+)", token, re.I)
         if m:
             current["equipment"] = m.group(1).strip()
+        m = re.search(r"draw[:\s]+(\d+)", token, re.I)
+        if m:
+            try:
+                current["draw"] = int(m.group(1))
+            except ValueError:
+                pass
+        m = re.search(r"pace[:\s]+(.+)", token, re.I)
+        if m:
+            ps = _normalize_pace(m.group(1).strip())
+            if ps:
+                current["pace_style"] = ps
 
 
 def _prev_dist_to_furlongs(dist_str: str) -> Optional[float]:
@@ -749,6 +780,8 @@ def parse_racecard_text(text: str) -> list:
             "comment":       r.get("comment", ""),
             "equipment":     r.get("equipment", ""),
             "previous_runs": r.get("previous_runs") or None,
+            "draw":          r.get("draw"),          # int or None
+            "pace_style":    r.get("pace_style", ""),
         })
 
     return cleaned
@@ -988,9 +1021,11 @@ def analyze_text(request: AnalyzeTextRequest):
             form=r["form"],
             trainer=r["trainer"],
             jockey=r["jockey"],
+            draw=r.get("draw"),
             comment=r.get("comment", ""),
             equipment=r.get("equipment", ""),
             previous_runs=r.get("previous_runs"),
+            pace_style=r.get("pace_style", ""),
         )
         for r in runners
     ]
@@ -1146,6 +1181,8 @@ TRAINER:
 FORM:
 AGE:
 WEIGHT:
+DRAW:
+PACE:
 ODDS:
 EQUIPMENT:
 COMMENT:
@@ -1158,6 +1195,8 @@ TRAINER:
 FORM:
 AGE:
 WEIGHT:
+DRAW:
+PACE:
 ODDS:
 EQUIPMENT:
 COMMENT:
@@ -1170,6 +1209,8 @@ TRAINER:
 FORM:
 AGE:
 WEIGHT:
+DRAW:
+PACE:
 ODDS:
 EQUIPMENT:
 COMMENT:
@@ -1182,6 +1223,8 @@ TRAINER:
 FORM:
 AGE:
 WEIGHT:
+DRAW:
+PACE:
 ODDS:
 EQUIPMENT:
 COMMENT:
@@ -1194,6 +1237,8 @@ TRAINER:
 FORM:
 AGE:
 WEIGHT:
+DRAW:
+PACE:
 ODDS:
 EQUIPMENT:
 COMMENT:
@@ -1206,6 +1251,8 @@ TRAINER:
 FORM:
 AGE:
 WEIGHT:
+DRAW:
+PACE:
 ODDS:
 EQUIPMENT:
 COMMENT:
@@ -1218,6 +1265,8 @@ TRAINER:
 FORM:
 AGE:
 WEIGHT:
+DRAW:
+PACE:
 ODDS:
 EQUIPMENT:
 COMMENT:
@@ -1230,6 +1279,8 @@ TRAINER:
 FORM:
 AGE:
 WEIGHT:
+DRAW:
+PACE:
 ODDS:
 EQUIPMENT:
 COMMENT:
