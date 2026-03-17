@@ -1310,31 +1310,13 @@ class RacePrecheckRequest(BaseModel):
     draw_pace_media_type: str = "image/png"
 
 
-@app.post("/race-precheck")
-def race_precheck(request: RacePrecheckRequest):
-    """
-    Broad triage tool: given two screenshots (main race + ATR draw/pace),
-    returns precheck_confidence (HIGH / MEDIUM / LOW) and a short_reason.
-    Does NOT predict winners or output Gold/Silver/Dark Horse picks.
-    """
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
-    if not api_key:
-        raise HTTPException(
-            status_code=503,
-            detail="Race Pre-Check is unavailable: ANTHROPIC_API_KEY not configured on server.",
-        )
+class RacePrecheckResponse(BaseModel):
+    precheck_confidence: str  # HIGH, MEDIUM, or LOW
+    short_reason: str
 
-    try:
-        import anthropic as _anthropic
-    except ImportError:
-        raise HTTPException(
-            status_code=503,
-            detail="Race Pre-Check is unavailable: anthropic package not installed.",
-        )
 
-    client = _anthropic.Anthropic(api_key=api_key)
-
-    prompt = (
+def _build_precheck_prompt() -> str:
+    return (
         "You are a horse racing triage assistant. "
         "You have been given two screenshots: "
         "(1) the main race market screen showing odds, field size, race type, prices, and general race structure; "
@@ -1359,6 +1341,62 @@ def race_precheck(request: RacePrecheckRequest):
         "Do not include any other text outside the JSON object."
     )
 
+
+def _parse_precheck_response(raw: str) -> RacePrecheckResponse:
+    import json as _json
+
+    parsed = None
+    # First try: parse the full response as JSON
+    try:
+        parsed = _json.loads(raw)
+    except _json.JSONDecodeError:
+        pass
+
+    # Fallback: regex extraction of first JSON object
+    if parsed is None:
+        json_match = re.search(r"\{[^}]+\}", raw, re.DOTALL)
+        if not json_match:
+            raise HTTPException(status_code=502, detail=f"Unexpected model response: {raw[:200]}")
+        try:
+            parsed = _json.loads(json_match.group())
+        except _json.JSONDecodeError:
+            raise HTTPException(status_code=502, detail=f"Could not parse model JSON: {raw[:200]}")
+
+    confidence = str(parsed.get("precheck_confidence", "")).upper()
+    if confidence not in ("HIGH", "MEDIUM", "LOW"):
+        confidence = "MEDIUM"
+
+    short_reason = str(parsed.get("short_reason", "")).strip()
+    if not short_reason:
+        short_reason = "Unable to determine race quality from screenshots."
+
+    return RacePrecheckResponse(precheck_confidence=confidence, short_reason=short_reason)
+
+
+@app.post("/race-precheck")
+def race_precheck(request: RacePrecheckRequest):
+    """
+    Broad triage tool: given two screenshots (main race + ATR draw/pace),
+    returns precheck_confidence (HIGH / MEDIUM / LOW) and a short_reason.
+    Does NOT predict winners or output Gold/Silver/Dark Horse picks.
+    """
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        raise HTTPException(
+            status_code=503,
+            detail="Race Pre-Check is unavailable: ANTHROPIC_API_KEY not configured on server.",
+        )
+
+    try:
+        import anthropic as _anthropic
+    except ImportError:
+        raise HTTPException(
+            status_code=503,
+            detail="Race Pre-Check is unavailable: anthropic package not installed.",
+        )
+
+    client = _anthropic.Anthropic(api_key=api_key)
+
     message = client.messages.create(
         model="claude-sonnet-4-6",
         max_tokens=200,
@@ -1382,37 +1420,15 @@ def race_precheck(request: RacePrecheckRequest):
                             "data": request.draw_pace_screenshot,
                         },
                     },
-                    {"type": "text", "text": prompt},
+                    {"type": "text", "text": _build_precheck_prompt()},
                 ],
             }
         ],
     )
 
     raw = message.content[0].text.strip()
-
-    # Extract JSON from the response
-    import json as _json
-    json_match = re.search(r"\{[^}]+\}", raw, re.DOTALL)
-    if not json_match:
-        raise HTTPException(status_code=502, detail=f"Unexpected model response: {raw[:200]}")
-
-    try:
-        parsed = _json.loads(json_match.group())
-    except _json.JSONDecodeError:
-        raise HTTPException(status_code=502, detail=f"Could not parse model JSON: {raw[:200]}")
-
-    confidence = str(parsed.get("precheck_confidence", "")).upper()
-    if confidence not in ("HIGH", "MEDIUM", "LOW"):
-        confidence = "MEDIUM"
-
-    short_reason = str(parsed.get("short_reason", "")).strip()
-    if not short_reason:
-        short_reason = "Unable to determine race quality from screenshots."
-
-    return {
-        "precheck_confidence": confidence,
-        "short_reason": short_reason,
-    }
+    result = _parse_precheck_response(raw)
+    return {"precheck_confidence": result.precheck_confidence, "short_reason": result.short_reason}
 
 
 @app.post("/debug-parse")
