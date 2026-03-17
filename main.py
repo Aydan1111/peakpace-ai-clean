@@ -1397,34 +1397,40 @@ def race_precheck(request: RacePrecheckRequest):
 
     client = _anthropic.Anthropic(api_key=api_key)
 
-    message = client.messages.create(
-        model="claude-sonnet-4-6",
-        max_tokens=200,
-        messages=[
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "image",
-                        "source": {
-                            "type": "base64",
-                            "media_type": request.main_media_type,
-                            "data": request.main_screenshot,
+    try:
+        message = client.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=200,
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "image",
+                            "source": {
+                                "type": "base64",
+                                "media_type": request.main_media_type,
+                                "data": request.main_screenshot,
+                            },
                         },
-                    },
-                    {
-                        "type": "image",
-                        "source": {
-                            "type": "base64",
-                            "media_type": request.draw_pace_media_type,
-                            "data": request.draw_pace_screenshot,
+                        {
+                            "type": "image",
+                            "source": {
+                                "type": "base64",
+                                "media_type": request.draw_pace_media_type,
+                                "data": request.draw_pace_screenshot,
+                            },
                         },
-                    },
-                    {"type": "text", "text": _build_precheck_prompt()},
-                ],
-            }
-        ],
-    )
+                        {"type": "text", "text": _build_precheck_prompt()},
+                    ],
+                }
+            ],
+        )
+    except Exception:
+        raise HTTPException(
+            status_code=502,
+            detail="Race Pre-Check failed: upstream vision service error.",
+        )
 
     raw = message.content[0].text.strip()
     result = _parse_precheck_response(raw)
