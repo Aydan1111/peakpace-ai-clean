@@ -794,7 +794,7 @@ def _race_confidence_label(
 
     # Missing pace context (Flat races only)
     if race.discipline == "Flat" and _pace_shape(runners) == "unknown":
-        pts -= 5
+        pts -= 3
 
     if pts >= 50:
         return "HIGH"
@@ -830,6 +830,16 @@ def _gold_pick_confidence(
             pts += 2
         elif gap < 0.005:
             pts -= 3   # nip-and-tuck with 2nd — less certain
+
+    # Additional credit for gap over 3rd (modest — confirms Gold is clear of the pack)
+    if len(scored) >= 3 and scored[2]["score"] > 0:
+        gap3 = (gold["score"] - scored[2]["score"]) / scored[2]["score"]
+        if gap3 >= 0.08:
+            pts += 3
+        elif gap3 >= 0.04:
+            pts += 2
+        elif gap3 >= 0.02:
+            pts += 1
 
     # Data coverage
     cov = gold.get("_coverage", 0.0)
