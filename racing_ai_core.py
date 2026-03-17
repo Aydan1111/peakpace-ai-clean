@@ -695,6 +695,333 @@ def _draw_pace_combo_multiplier(runner: Runner, runners: List["Runner"],
 
 
 # ============================================================
+# CONFIDENCE SYSTEM  (race + per-pick)
+# ============================================================
+
+def _race_confidence_label(
+    scored: list,
+    race: RaceInfo,
+    runners: List[Runner],
+    gold_entry: Optional[dict],
+    norm_prob: Dict[str, float],
+    odds_decimal: Dict[str, float],
+) -> str:
+    """Rate how trustworthy / clear / playable this race is as a betting medium.
+
+    Returns 'HIGH', 'MEDIUM', or 'LOW'.
+    Points-based: HIGH ≥ 50 · MEDIUM ≥ 20 · LOW < 20.
+
+    Ingredients
+    -----------
+    1. Top-vs-second score gap        (max +25)
+    2. Top-vs-third score gap         (max +15)
+    3. Average data coverage, top 3   (max +20)
+    4. Market corroboration for Gold  (−15 to +15)
+    5. Chaos / volatility penalties   (cumulative negatives)
+    """
+    pts = 0
+    n   = len(scored)
+
+    # 1. Top-vs-second score gap
+    if n >= 2 and scored[1]["score"] > 0:
+        gap12 = (scored[0]["score"] - scored[1]["score"]) / scored[1]["score"]
+        if gap12 >= 0.05:
+            pts += 25
+        elif gap12 >= 0.025:
+            pts += 15
+        elif gap12 >= 0.01:
+            pts += 5
+    elif n == 1:
+        pts += 15
+
+    # 2. Top-vs-third score gap
+    if n >= 3 and scored[2]["score"] > 0:
+        gap13 = (scored[0]["score"] - scored[2]["score"]) / scored[2]["score"]
+        if gap13 >= 0.08:
+            pts += 15
+        elif gap13 >= 0.04:
+            pts += 8
+        elif gap13 >= 0.02:
+            pts += 3
+
+    # 3. Average data coverage of top 3
+    top3 = scored[:min(3, n)]
+    if top3:
+        avg_cov = sum(h.get("_coverage", 0.0) for h in top3) / len(top3)
+        if avg_cov >= 0.60:
+            pts += 20
+        elif avg_cov >= 0.40:
+            pts += 12
+        elif avg_cov >= 0.20:
+            pts += 5
+
+    # 4. Market corroboration for Gold
+    if gold_entry and norm_prob and len(norm_prob) >= 2:
+        gname     = _normalize_name(gold_entry["name"])
+        gold_prob = norm_prob.get(gname, 0.0)
+        avg_prob  = 1.0 / len(norm_prob)
+        gold_dec  = odds_decimal.get(gname, 0.0)
+        if gold_prob >= 2.0 * avg_prob:
+            pts += 15   # model and market both back same clear favourite
+        elif gold_prob >= 1.3 * avg_prob:
+            pts += 8    # near-agreement
+        if gold_dec > 51.0:
+            pts -= 15   # 50/1+ → market strongly disagrees
+        elif gold_dec > 20.0:
+            pts -= 5
+
+    # 5. Chaos / volatility penalties
+    if _is_nh(race.race_type):
+        pts -= 5   # National Hunt: naturally higher variance than Flat
+        rt_low = race.race_type.lower()
+        if "handicap" in rt_low and "chase" in rt_low:
+            pts -= 5   # handicap chases: wide-open, form often inverts
+        elif race.distance_f >= 20.0:
+            pts -= 5   # extreme-distance NH: stamina/fitness hard to model
+    if _is_wet_jumps(race):
+        pts -= 5   # attritional wet-jumps conditions flip form reliably
+
+    if norm_prob and len(norm_prob) >= 2:
+        max_p = max(norm_prob.values())
+        avg_p = 1.0 / len(norm_prob)
+        if max_p < 1.5 * avg_p:
+            pts -= 10  # no dominant price — genuinely open field
+
+    if n >= 3 and scored[2]["score"] > 0:
+        spread13 = (scored[0]["score"] - scored[2]["score"]) / scored[2]["score"]
+        if spread13 < 0.01:
+            pts -= 10  # top 3 within 1% — no meaningful separation
+
+    # Missing pace context (Flat races only)
+    if race.discipline == "Flat" and _pace_shape(runners) == "unknown":
+        pts -= 5
+
+    if pts >= 50:
+        return "HIGH"
+    if pts >= 20:
+        return "MEDIUM"
+    return "LOW"
+
+
+def _gold_pick_confidence(
+    gold: dict,
+    scored: list,
+    race: RaceInfo,
+    race_conf: str,
+    norm_prob: Dict[str, float],
+    odds_decimal: Dict[str, float],
+) -> int:
+    """How confident are we that Gold is the right main selection?
+
+    Components: score edge · data quality · going suitability ·
+                market corroboration · race-level adjustment.
+    Returns int [70, 95].
+    """
+    pts = 78   # base: solid but not certain
+
+    # Score edge over 2nd
+    if len(scored) >= 2 and scored[1]["score"] > 0:
+        gap = (gold["score"] - scored[1]["score"]) / scored[1]["score"]
+        if gap >= 0.05:
+            pts += 6
+        elif gap >= 0.025:
+            pts += 4
+        elif gap >= 0.01:
+            pts += 2
+        elif gap < 0.005:
+            pts -= 3   # nip-and-tuck with 2nd — less certain
+
+    # Data coverage
+    cov = gold.get("_coverage", 0.0)
+    if cov >= 0.60:
+        pts += 3
+    elif cov >= 0.35:
+        pts += 1
+    elif cov < 0.20:
+        pts -= 4
+
+    # Going suitability
+    gpen = gold.get("_going_pen", 0)
+    if gpen >= 3:
+        pts -= 3
+    elif gpen >= 1:
+        pts -= 1
+
+    # Market corroboration
+    if norm_prob and len(norm_prob) >= 2 and odds_decimal:
+        gname     = _normalize_name(gold["name"])
+        gold_prob = norm_prob.get(gname, 0.0)
+        avg_prob  = 1.0 / len(norm_prob)
+        gold_dec  = odds_decimal.get(gname, 0.0)
+        if gold_prob >= 2.0 * avg_prob:
+            pts += 4   # market backs same horse — corroborating signal
+        elif gold_prob >= 1.3 * avg_prob:
+            pts += 2
+        if gold_dec > 51.0:
+            pts -= 5   # 50/1+ → market strongly disagrees
+        elif gold_dec > 20.0:
+            pts -= 2
+
+    # Race-level adjustment
+    if race_conf == "HIGH":
+        pts += 2
+    elif race_conf == "LOW":
+        pts -= 4
+
+    return max(70, min(95, pts))
+
+
+def _silver_pick_confidence(
+    silver: dict,
+    gold: dict,
+    scored: list,
+    race: RaceInfo,
+    race_conf: str,
+    norm_prob: Dict[str, float],
+    odds_decimal: Dict[str, float],
+) -> int:
+    """How confident are we that Silver is the right secondary pick?
+
+    Components: score proximity to Gold · profile distinctiveness ·
+                data quality · going suitability · market plausibility ·
+                race-level adjustment.
+    Returns int [70, 95].  Usually below Gold confidence.
+    """
+    pts = 74   # base: below Gold by default
+
+    # Score proximity to Gold
+    gold_sc = gold.get("score", 0.0) if gold else 0.0
+    if gold_sc > 0:
+        ratio = silver["score"] / gold_sc
+        if ratio >= 0.95:
+            pts += 6   # near-equal — very close race
+        elif ratio >= 0.85:
+            pts += 4
+        elif ratio >= 0.75:
+            pts += 2
+        # < 0.75 → 0  (plausibility gate already applied in pick selection)
+
+    # Profile distinctiveness: form-driven vs class-driven
+    n = len(scored)
+    if n > 0 and gold:
+        avg_form  = sum(h["form"] for h in scored) / n
+        avg_class = sum(h["_rating_b"] * h["_perf_b"] for h in scored) / n
+        if avg_form > 0 and avg_class > 0:
+            g_form_rel  = gold["form"]   / avg_form
+            g_class_rel = (gold["_rating_b"]   * gold["_perf_b"])   / avg_class
+            s_form_rel  = silver["form"] / avg_form
+            s_class_rel = (silver["_rating_b"] * silver["_perf_b"]) / avg_class
+            # Different dominant strength → genuinely contrasting danger
+            if (g_form_rel > g_class_rel) != (s_form_rel > s_class_rel):
+                pts += 2
+
+    # Data coverage
+    cov = silver.get("_coverage", 0.0)
+    if cov >= 0.60:
+        pts += 2
+    elif cov >= 0.35:
+        pts += 1
+    elif cov < 0.20:
+        pts -= 3
+
+    # Going suitability
+    gpen = silver.get("_going_pen", 0)
+    if gpen >= 3:
+        pts -= 3
+    elif gpen >= 1:
+        pts -= 1
+
+    # Market plausibility relative to Gold
+    if odds_decimal and gold:
+        gname = _normalize_name(gold["name"])
+        sname = _normalize_name(silver["name"])
+        gdec  = odds_decimal.get(gname, 0.0)
+        sdec  = odds_decimal.get(sname, 0.0)
+        if gdec > 0 and sdec > 0:
+            price_ratio = sdec / gdec
+            if price_ratio <= 3.0:
+                pts += 2   # credible market challenger
+            elif price_ratio > 10.0:
+                pts -= 2   # much bigger price → less likely secondary pick
+
+    # Race-level adjustment
+    if race_conf == "HIGH":
+        pts += 1
+    elif race_conf == "LOW":
+        pts -= 3
+
+    return max(70, min(95, pts))
+
+
+def _dark_horse_confidence(
+    dark: dict,
+    gold: dict,
+    scored: list,
+    race: RaceInfo,
+    race_conf: str,
+    norm_prob: Dict[str, float],
+    odds_decimal: Dict[str, float],
+) -> int:
+    """How confident are we this is the right speculative outsider pick?
+
+    Components: plausibility · upside signals · data quality ·
+                market / odds context · race-level adjustment.
+    Returns int [70, 95].  Usually below Gold.
+    Chaotic race does NOT inflate dark horse confidence.
+    """
+    pts = 71   # base: inherently speculative
+
+    # Plausibility — score relative to Gold
+    gold_sc = gold.get("score", 0.0) if gold else 0.0
+    if gold_sc > 0:
+        ratio = dark["score"] / gold_sc
+        if ratio >= 0.80:
+            pts += 5
+        elif ratio >= 0.70:
+            pts += 3
+        elif ratio >= 0.60:
+            pts += 1
+
+    # Upside signals — evidence the model may underestimate this horse
+    rating_edge = dark.get("_rating_edge", 0.0)
+    if rating_edge >= 5:
+        pts += 4   # rated above field average but ranked lower by model
+    elif rating_edge >= 2:
+        pts += 2
+
+    perf_b = dark.get("_perf_b", 1.0)
+    if perf_b >= 1.05:
+        pts += 2   # win-rate stats show ability not fully captured in score
+
+    # Data coverage
+    cov = dark.get("_coverage", 0.0)
+    if cov >= 0.50:
+        pts += 2
+    elif cov < 0.20:
+        pts -= 3
+
+    # Odds context — must be an outsider but not hopeless
+    if odds_decimal:
+        dname = _normalize_name(dark["name"])
+        ddec  = odds_decimal.get(dname, 0.0)
+        if ddec > 0:
+            if ddec > 34.0:
+                pts -= 4   # 33/1+ — very hard to win
+            elif ddec > 20.0:
+                pts -= 1
+            elif ddec < 6.0:
+                pts -= 3   # too short to qualify as a value dark horse
+
+    # Race-level adjustment (chaos does NOT inflate dark horse confidence)
+    if race_conf == "HIGH":
+        pts += 1
+    elif race_conf == "LOW":
+        pts -= 2
+
+    return max(70, min(95, pts))
+
+
+# ============================================================
 # CORE ENGINE
 # ============================================================
 
@@ -1837,36 +2164,6 @@ class RacingAICore:
             else:
                 entry["_rating_edge"] = 0.0
 
-        # Race-level confidence based on percentage lead of top horse over second.
-        # Using a relative spread avoids penalising races where absolute scores
-        # are compressed (e.g. large, evenly-matched fields).
-        race_confidence = "LOW"
-        if len(scored) >= 2:
-            spread_pct = (
-                (scored[0]["score"] - scored[1]["score"]) / scored[1]["score"]
-                if scored[1]["score"] > 0 else 0.0
-            )
-            if spread_pct >= 0.04:      # top horse ≥4% clear → HIGH
-                race_confidence = "HIGH"
-            elif spread_pct >= 0.012:   # top horse ≥1.2% clear → MEDIUM
-                race_confidence = "MEDIUM"
-        elif len(scored) == 1:
-            race_confidence = "MEDIUM"
-
-        # Market structure nudge — applies only when field-wide odds are present.
-        # A dominant market favourite that the model also selects strengthens
-        # confidence; a very open market with no clear favourite weakens it.
-        if _norm_prob and len(_norm_prob) >= 2:
-            _avg_p      = 1.0 / len(_norm_prob)
-            _max_p      = max(_norm_prob.values())
-            _top_model_p = _norm_prob.get(_normalize_name(scored[0]["name"]), 0.0)
-            # Model's top pick is the market's clear favourite (>2.5× average)
-            if _top_model_p >= 2.5 * _avg_p and race_confidence == "MEDIUM":
-                race_confidence = "HIGH"
-            # Very open market — no runner priced above 1.5× average → MEDIUM
-            if _max_p < 1.5 * _avg_p and race_confidence == "HIGH":
-                race_confidence = "MEDIUM"
-
         # Helper to build a writeup from a scored entry
         def _wp(entry):
             return self._build_writeup(
@@ -2183,6 +2480,22 @@ class RacingAICore:
                    "writeup": _wp(gold_entry)}   if gold_entry   else None)
         silver = ({**silver_entry, "label": "Good Place Bet",
                    "writeup": _wp(silver_entry)} if silver_entry else None)
+
+        # ── New race confidence + per-pick confidences ────────────────────────
+        # race_confidence: replaces the old spread-only inline block.
+        # Pick confidences: override the generic per-horse value with a
+        # pick-specific score.  Temp fields are still present at this point.
+        race_confidence = _race_confidence_label(
+            scored, race, runners, gold_entry, _norm_prob, _odds_decimal)
+        if gold and gold_entry:
+            gold["confidence"] = _gold_pick_confidence(
+                gold, scored, race, race_confidence, _norm_prob, _odds_decimal)
+        if silver and silver_entry:
+            silver["confidence"] = _silver_pick_confidence(
+                silver, gold, scored, race, race_confidence, _norm_prob, _odds_decimal)
+        if dark:
+            dark["confidence"] = _dark_horse_confidence(
+                dark, gold, scored, race, race_confidence, _norm_prob, _odds_decimal)
 
         dark_name = dark["name"] if dark else None
 
