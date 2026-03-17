@@ -518,6 +518,46 @@ def _draw_position(stall: int, field_size: int) -> str:
     return "high"
 
 
+def _normalize_surface_for_draw(surface: str) -> str:
+    """Normalize a surface string to a DRAW_BIAS table key: 'aw' or 'turf'."""
+    s = surface.lower().strip().replace("-", " ").replace("_", " ")
+    if s in ("aw", "all weather", "standard", "tapeta", "polytrack",
+             "fibresand", "dirt"):
+        return "aw"
+    return "turf"
+
+
+def _draw_bias_key(race: RaceInfo) -> tuple:
+    """Build the DRAW_BIAS lookup key for a race."""
+    return (
+        race.course.lower().strip(),
+        race.distance_f,
+        _normalize_surface_for_draw(race.surface),
+        _runner_band(race.runners),
+    )
+
+
+def _draw_favourability(runner: Runner, race: RaceInfo) -> str:
+    """Return 'favourable', 'neutral', 'unfavourable', or 'unknown'.
+
+    Uses the actual DRAW_BIAS entry so favourability is course/distance
+    specific rather than assuming low draw = good.
+    'unknown' is returned when no bias row exists for this race configuration.
+    """
+    if runner.draw is None:
+        return "unknown"
+    bias = DRAW_BIAS.get(_draw_bias_key(race))
+    if bias is None:
+        return "unknown"
+    pos  = _draw_position(runner.draw, race.runners)
+    mult = bias.get(pos, 1.0)
+    if mult > 1.005:
+        return "favourable"
+    if mult < 0.995:
+        return "unfavourable"
+    return "neutral"
+
+
 def _draw_multiplier(runner: Runner, race: RaceInfo) -> float:
     """Small draw-bias multiplier for Flat races only.  Returns 1.0 otherwise."""
     if race.discipline != "Flat":
@@ -525,12 +565,7 @@ def _draw_multiplier(runner: Runner, race: RaceInfo) -> float:
     if runner.draw is None:
         return 1.0
 
-    course  = race.course.lower().strip()
-    surface = race.surface.lower().strip()
-    band    = _runner_band(race.runners)
-    key     = (course, race.distance_f, surface, band)
-
-    bias = DRAW_BIAS.get(key)
+    bias = DRAW_BIAS.get(_draw_bias_key(race))
     if bias is None:
         return 1.0
 
@@ -560,8 +595,14 @@ def _pace_counts(runners: List["Runner"]) -> dict:
 def _pace_shape(runners: List["Runner"]) -> str:
     """Classify the race pace shape from the field.
 
-    Returns: 'strong' | 'controlled' | 'steady' | 'weak'
+    Returns 'unknown' when fewer than 2 runners have a known pace style OR
+    fewer than 40% of the field do — not enough signal to infer shape reliably.
+    Otherwise returns: 'strong' | 'controlled' | 'steady' | 'weak'
     """
+    known = sum(1 for r in runners
+                if (r.pace_style or "").lower().strip() in _PACE_ORDER)
+    if known < 2 or (len(runners) > 0 and known / len(runners) < 0.40):
+        return "unknown"
     c = _pace_counts(runners)
     if c["leader"] >= 2:
         return "strong"
@@ -582,6 +623,9 @@ def _pace_multiplier(runner: Runner, runners: List["Runner"],
         return 1.0
 
     shape = _pace_shape(runners)
+    if shape == "unknown":
+        return 1.0
+
     delta = 0.0
 
     if shape == "weak":
@@ -616,27 +660,36 @@ def _pace_multiplier(runner: Runner, runners: List["Runner"],
 
 def _draw_pace_combo_multiplier(runner: Runner, runners: List["Runner"],
                                 race: RaceInfo) -> float:
-    """Tiny interaction between draw and pace style.  Flat only; ±3% max."""
+    """Tiny draw+pace interaction.  Flat only; ±3% max.
+
+    Uses actual DRAW_BIAS favourability rather than assuming low = good.
+    Returns 1.0 when pace shape is unknown or no bias row exists for the race.
+    """
     if race.discipline != "Flat":
         return 1.0
     if runner.draw is None:
         return 1.0
 
-    ps    = (runner.pace_style or "").lower().strip()
     shape = _pace_shape(runners)
-    pos   = _draw_position(runner.draw, race.runners)
+    if shape == "unknown":
+        return 1.0
 
+    favour = _draw_favourability(runner, race)
+    if favour == "unknown":
+        # No DRAW_BIAS entry for this course/distance/surface — no combo signal
+        return 1.0
+
+    ps    = (runner.pace_style or "").lower().strip()
     delta = 0.0
 
     if shape == "weak":
-        # Weak pace rewards front-running from a good draw
-        if pos == "low" and ps in ("leader", "prominent", "midfield"):
+        if favour == "favourable" and ps in ("leader", "prominent", "midfield"):
             delta = +0.020
-        elif pos == "high" and ps == "hold_up":
+        elif favour == "unfavourable" and ps == "hold_up":
             delta = -0.015
 
-    # Strong pace handled by _pace_multiplier; no additional combo signal here
-    # Controlled / steady: neutral
+    # Strong pace handled by _pace_multiplier; no additional combo signal here.
+    # Controlled / steady: neutral.
 
     return max(0.97, min(1.03, 1.0 + delta))
 
