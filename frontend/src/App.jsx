@@ -264,6 +264,7 @@ export default function App() {
 
   // Race Pre-Check state — isolated from main analysis state
   const [precheckMainShot, setPrecheckMainShot] = useState(null);
+  const [precheckPaceShot, setPrecheckPaceShot] = useState(null);
   const [precheckDrawShot, setPrecheckDrawShot] = useState(null);
   const [precheckResult, setPrecheckResult] = useState(null);
   const [precheckLoading, setPrecheckLoading] = useState(false);
@@ -303,16 +304,18 @@ export default function App() {
   };
 
   const runPrecheck = async () => {
-    if (!precheckMainShot || !precheckDrawShot) return;
+    if (!precheckMainShot || !precheckPaceShot || !precheckDrawShot) return;
     setPrecheckLoading(true);
     setPrecheckError(null);
     setPrecheckResult(null);
     try {
       const payload = {
-        main_screenshot:       stripDataPrefix(precheckMainShot.preview),
-        draw_pace_screenshot:  stripDataPrefix(precheckDrawShot.preview),
-        main_media_type:       precheckMainShot.mediaType || "image/png",
-        draw_pace_media_type:  precheckDrawShot.mediaType  || "image/png",
+        main_screenshot:  stripDataPrefix(precheckMainShot.preview),
+        pace_screenshot:  stripDataPrefix(precheckPaceShot.preview),
+        draw_screenshot:  stripDataPrefix(precheckDrawShot.preview),
+        main_media_type:  precheckMainShot.mediaType || "image/png",
+        pace_media_type:  precheckPaceShot.mediaType || "image/png",
+        draw_media_type:  precheckDrawShot.mediaType || "image/png",
       };
       const res = await fetch(`${API_BASE}/race-precheck`, {
         method: "POST",
@@ -492,8 +495,10 @@ export default function App() {
           {inputMode === "precheck" ? (
             <RacePreCheck
               mainShot={precheckMainShot}
+              paceShot={precheckPaceShot}
               drawShot={precheckDrawShot}
               onMainChange={setPrecheckMainShot}
+              onPaceChange={setPrecheckPaceShot}
               onDrawChange={setPrecheckDrawShot}
               onRun={runPrecheck}
               loading={precheckLoading}
