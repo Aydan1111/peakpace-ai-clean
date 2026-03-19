@@ -1305,9 +1305,11 @@ def canonical_template():
 
 class RacePrecheckRequest(BaseModel):
     main_screenshot: str       # base64-encoded image data (without data-URL prefix)
-    draw_pace_screenshot: str  # base64-encoded image data (without data-URL prefix)
+    pace_screenshot: str       # base64-encoded ATR Pace screenshot
+    draw_screenshot: str       # base64-encoded ATR Draw screenshot
     main_media_type: str = "image/png"       # e.g. "image/png" or "image/jpeg"
-    draw_pace_media_type: str = "image/png"
+    pace_media_type: str = "image/png"
+    draw_media_type: str = "image/png"
 
 
 class RacePrecheckResponse(BaseModel):
@@ -1318,9 +1320,10 @@ class RacePrecheckResponse(BaseModel):
 def _build_precheck_prompt() -> str:
     return (
         "You are a horse racing triage assistant. "
-        "You have been given two screenshots: "
+        "You have been given three screenshots: "
         "(1) the main race market screen showing odds, field size, race type, prices, and general race structure; "
-        "(2) the ATR draw and pace setup screen.\n\n"
+        "(2) the ATR pace setup screen; "
+        "(3) the ATR draw screen.\n\n"
         "Your task is to give a BROAD PRE-CHECK only. "
         "DO NOT try to pick a winner. DO NOT output Gold/Silver/Dark Horse picks. "
         "DO NOT do deep horse-by-horse analysis.\n\n"
@@ -1329,8 +1332,8 @@ def _build_precheck_prompt() -> str:
         "- Market openness (tight clear favourite vs wide open market)\n"
         "- Strength / confidence of the favourite's price\n"
         "- Race type volatility (handicap vs conditions race etc.)\n"
-        "- Draw shape from the ATR screen (favoured draw visible or not)\n"
-        "- Pace setup (clear pace scenario or chaotic)\n"
+        "- Draw shape from the ATR draw screen (favoured draw visible or not)\n"
+        "- Pace setup from the ATR pace screen (clear pace scenario or chaotic)\n"
         "- Whether the race looks generally clear or messy overall\n\n"
         "Return ONLY a valid JSON object with exactly these two keys:\n"
         '{ "precheck_confidence": "HIGH" | "MEDIUM" | "LOW", "short_reason": "<one sentence>" }\n\n'
@@ -1376,7 +1379,7 @@ def _parse_precheck_response(raw: str) -> RacePrecheckResponse:
 @app.post("/race-precheck")
 def race_precheck(request: RacePrecheckRequest):
     """
-    Broad triage tool: given two screenshots (main race + ATR draw/pace),
+    Broad triage tool: given three screenshots (main race + ATR pace + ATR draw),
     returns precheck_confidence (HIGH / MEDIUM / LOW) and a short_reason.
     Does NOT predict winners or output Gold/Silver/Dark Horse picks.
     """
@@ -1417,8 +1420,16 @@ def race_precheck(request: RacePrecheckRequest):
                             "type": "image",
                             "source": {
                                 "type": "base64",
-                                "media_type": request.draw_pace_media_type,
-                                "data": request.draw_pace_screenshot,
+                                "media_type": request.pace_media_type,
+                                "data": request.pace_screenshot,
+                            },
+                        },
+                        {
+                            "type": "image",
+                            "source": {
+                                "type": "base64",
+                                "media_type": request.draw_media_type,
+                                "data": request.draw_screenshot,
                             },
                         },
                         {"type": "text", "text": _build_precheck_prompt()},

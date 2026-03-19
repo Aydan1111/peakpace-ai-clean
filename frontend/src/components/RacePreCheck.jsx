@@ -3,14 +3,17 @@ import { useRef } from "react";
 /**
  * RacePreCheck — screenshot-based broad triage tool.
  *
- * Requires TWO screenshots before the Run Pre-Check button is enabled:
+ * Requires THREE screenshots before the Run Pre-Check button is enabled:
  *   1. Main Race Screenshot  (market shape, prices, field size, race structure)
- *   2. ATR Draw/Pace Screenshot  (draw and pace setup)
+ *   2. ATR Pace Screenshot   (pace setup)
+ *   3. ATR Draw Screenshot   (draw setup)
  *
  * Props:
  *   mainShot       – { file, preview, mediaType } | null
+ *   paceShot       – { file, preview, mediaType } | null
  *   drawShot       – { file, preview, mediaType } | null
  *   onMainChange   – (shotObj | null) => void
+ *   onPaceChange   – (shotObj | null) => void
  *   onDrawChange   – (shotObj | null) => void
  *   onRun          – () => void
  *   loading        – bool
@@ -19,8 +22,10 @@ import { useRef } from "react";
  */
 export default function RacePreCheck({
   mainShot,
+  paceShot,
   drawShot,
   onMainChange,
+  onPaceChange,
   onDrawChange,
   onRun,
   loading,
@@ -28,10 +33,11 @@ export default function RacePreCheck({
   error,
 }) {
   const mainRef = useRef(null);
+  const paceRef = useRef(null);
   const drawRef = useRef(null);
 
-  const bothPresent = !!mainShot && !!drawShot;
-  const canRun = bothPresent && !loading;
+  const allPresent = !!mainShot && !!paceShot && !!drawShot;
+  const canRun = allPresent && !loading;
 
   const handleFile = (e, setter) => {
     const file = e.target.files?.[0];
@@ -50,21 +56,22 @@ export default function RacePreCheck({
     if (inputRef.current) inputRef.current.value = "";
   };
 
-  // Waiting message shown when only one screenshot is uploaded
+  // Waiting message shown when not all three screenshots are uploaded
+  const uploaded = [mainShot, paceShot, drawShot].filter(Boolean).length;
   let waitingMsg = null;
-  if (!mainShot && !drawShot) {
-    waitingMsg = null; // show nothing — user hasn't started yet
-  } else if (!mainShot && drawShot) {
-    waitingMsg = "Waiting for main race screenshot";
-  } else if (mainShot && !drawShot) {
-    waitingMsg = "Waiting for ATR draw/pace screenshot";
+  if (uploaded > 0 && uploaded < 3) {
+    const missing = [];
+    if (!mainShot) missing.push("main race screenshot");
+    if (!paceShot) missing.push("ATR pace screenshot");
+    if (!drawShot) missing.push("ATR draw screenshot");
+    waitingMsg = `Waiting for ${missing.join(" and ")}`;
   }
 
   return (
     <div className="space-y-6">
 
       {/* ── Upload Areas ───────────────────────────────────────────────── */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <UploadArea
           label="Main Race Screenshot"
           hint="Market odds · field size · race type · race structure"
@@ -74,8 +81,16 @@ export default function RacePreCheck({
           onClear={() => clearShot(onMainChange, mainRef)}
         />
         <UploadArea
-          label="ATR Draw / Pace Screenshot"
-          hint="Draw setup · pace setup"
+          label="ATR Pace Screenshot"
+          hint="Pace setup"
+          shot={paceShot}
+          inputRef={paceRef}
+          onSelect={(e) => handleFile(e, onPaceChange)}
+          onClear={() => clearShot(onPaceChange, paceRef)}
+        />
+        <UploadArea
+          label="ATR Draw Screenshot"
+          hint="Draw setup"
           shot={drawShot}
           inputRef={drawRef}
           onSelect={(e) => handleFile(e, onDrawChange)}
