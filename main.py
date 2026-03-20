@@ -1459,10 +1459,10 @@ def race_precheck(request: RacePrecheckRequest):
 
     client = _anthropic.Anthropic(api_key=api_key)
 
-    # Normalize all three screenshots before sending upstream
-    main_b64, main_mime = _normalize_precheck_image(request.main_screenshot, request.main_media_type)
-    pace_b64, pace_mime = _normalize_precheck_image(request.pace_screenshot, request.pace_media_type)
-    draw_b64, draw_mime = _normalize_precheck_image(request.draw_screenshot, request.draw_media_type)
+    # TEMP: bypass image normalization/validation — pass images through as received
+    main_b64, main_mime = request.main_screenshot, request.main_media_type
+    pace_b64, pace_mime = request.pace_screenshot, request.pace_media_type
+    draw_b64, draw_mime = request.draw_screenshot, request.draw_media_type
 
     try:
         message = client.messages.create(
