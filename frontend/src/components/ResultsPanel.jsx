@@ -57,11 +57,48 @@ export default function ResultsPanel({ result }) {
     ? "bg-gold/20 text-gold border-gold/40"
     : "bg-gray-500/20 text-gray-300 border-gray-500/40";
 
+  const isJumps        = !!result.is_jumps;
   const jumpsFilterOn  = result.jumps_check_filter === "ON";
   const jumpsFilterReason = result.jumps_check_reason || "";
 
   const hasSilver = !!result.silver_pick;
   const hasDark   = !!(result.dark_horse && darkName !== silverName);
+
+  // Exclude controls block — reused below in Jumps section or standalone
+  const ExcludeControls = (hasSilver || hasDark) ? (
+    <div className="flex flex-wrap gap-3 items-center">
+      <span className="text-xs text-text-dim uppercase tracking-wider">Manual exclude:</span>
+      {hasSilver && (
+        <button
+          onClick={() => setExcludeSilver((v) => !v)}
+          className={`text-xs px-3 py-1 rounded border transition-colors ${
+            excludeSilver
+              ? "border-red-500/60 bg-red-500/20 text-red-300"
+              : "border-gray-400/40 bg-gray-400/10 text-gray-300 hover:border-red-400/50 hover:bg-red-400/10 hover:text-red-300"
+          }`}
+        >
+          {excludeSilver ? "✕ Silver excluded" : "✕ Exclude Silver"}
+        </button>
+      )}
+      {hasDark && (
+        <button
+          onClick={() => setExcludeDark((v) => !v)}
+          className={`text-xs px-3 py-1 rounded border transition-colors ${
+            excludeDark
+              ? "border-red-500/60 bg-red-500/20 text-red-300"
+              : "border-purple-400/40 bg-purple-400/10 text-purple-300 hover:border-red-400/50 hover:bg-red-400/10 hover:text-red-300"
+          }`}
+        >
+          {excludeDark ? "✕ Dark Horse excluded" : "✕ Exclude Dark Horse"}
+        </button>
+      )}
+      {(excludeSilver || excludeDark) && (
+        <span className="text-xs text-text-dim italic opacity-60">
+          Display only — model scores unchanged
+        </span>
+      )}
+    </div>
+  ) : null;
 
   return (
     <section className="bg-surface rounded-xl border border-border p-6 space-y-6">
@@ -76,58 +113,55 @@ export default function ResultsPanel({ result }) {
         )}
       </div>
 
-      {/* Jumps Check Filter advisory — only shown for Jumps races when ON */}
-      {jumpsFilterOn && (
-        <div className="rounded-lg border border-orange-400/50 bg-orange-400/10 p-4 space-y-1">
-          <div className="flex items-center gap-2">
-            <span className="text-orange-300 text-sm font-bold uppercase tracking-wider">
-              ⚠ Jumps Check Filter: ON
+      {/* ── Jumps Check Filter — visible on ALL Jumps races, hidden on Flat ── */}
+      {isJumps && (
+        <div className={`rounded-xl border-2 p-4 space-y-3 ${
+          jumpsFilterOn
+            ? "border-orange-400/70 bg-orange-400/10"
+            : "border-gray-600/50 bg-gray-700/20"
+        }`}>
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <span className="text-sm font-bold uppercase tracking-wider text-orange-200">
+              Jumps Check Filter
+            </span>
+            <span className={`text-xs font-bold uppercase tracking-wider px-2 py-1 rounded border ${
+              jumpsFilterOn
+                ? "border-orange-400/60 bg-orange-400/20 text-orange-300"
+                : "border-gray-500/50 bg-gray-500/10 text-gray-400"
+            }`}>
+              {jumpsFilterOn ? "ON" : "OFF"}
             </span>
           </div>
-          <p className="text-orange-200 text-xs leading-relaxed">
-            {jumpsFilterReason}
-          </p>
-          <p className="text-orange-300/70 text-xs italic">
-            Advisory only — rankings and picks are unchanged. Use the exclude controls below if needed.
-          </p>
+
+          {jumpsFilterOn ? (
+            <>
+              <p className="text-orange-200 text-xs leading-relaxed font-medium">
+                ⚠ {jumpsFilterReason}
+              </p>
+              <p className="text-orange-300/80 text-xs leading-relaxed border-l-2 border-orange-400/50 pl-3">
+                Market leaders are not standout jumps profiles. Consider ignoring the top 2 in the market for place / value analysis.
+              </p>
+              <p className="text-orange-300/60 text-xs italic">
+                Advisory only — rankings and picks are unchanged.
+              </p>
+            </>
+          ) : (
+            <p className="text-gray-400 text-xs">
+              No special jumps-market warning.
+            </p>
+          )}
+
+          {/* Exclude controls sit directly below the filter on Jumps races */}
+          {ExcludeControls && (
+            <div className="pt-2 border-t border-border/30">
+              {ExcludeControls}
+            </div>
+          )}
         </div>
       )}
 
-      {/* Manual exclude controls for Silver and Dark Horse */}
-      {(hasSilver || hasDark) && (
-        <div className="flex flex-wrap gap-3 items-center">
-          <span className="text-xs text-text-dim uppercase tracking-wider">Manual exclude:</span>
-          {hasSilver && (
-            <button
-              onClick={() => setExcludeSilver((v) => !v)}
-              className={`text-xs px-3 py-1 rounded border transition-colors ${
-                excludeSilver
-                  ? "border-red-500/60 bg-red-500/20 text-red-300"
-                  : "border-gray-400/40 bg-gray-400/10 text-gray-300 hover:border-red-400/50 hover:bg-red-400/10 hover:text-red-300"
-              }`}
-            >
-              {excludeSilver ? "✕ Silver excluded" : "✕ Exclude Silver"}
-            </button>
-          )}
-          {hasDark && (
-            <button
-              onClick={() => setExcludeDark((v) => !v)}
-              className={`text-xs px-3 py-1 rounded border transition-colors ${
-                excludeDark
-                  ? "border-red-500/60 bg-red-500/20 text-red-300"
-                  : "border-purple-400/40 bg-purple-400/10 text-purple-300 hover:border-red-400/50 hover:bg-red-400/10 hover:text-red-300"
-              }`}
-            >
-              {excludeDark ? "✕ Dark Horse excluded" : "✕ Exclude Dark Horse"}
-            </button>
-          )}
-          {(excludeSilver || excludeDark) && (
-            <span className="text-xs text-text-dim italic opacity-60">
-              Display only — model scores unchanged
-            </span>
-          )}
-        </div>
-      )}
+      {/* Manual exclude controls for Flat races (shown outside the jumps section) */}
+      {!isJumps && ExcludeControls}
 
       {/* Top Picks */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">

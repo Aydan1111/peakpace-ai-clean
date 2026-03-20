@@ -2644,6 +2644,8 @@ class RacingAICore:
         jumps_check = _jumps_check_filter(
             race, scored, race_confidence, _norm_prob, _odds_decimal)
 
+        is_jumps = race.discipline == "Jumps" or _is_nh(race.race_type)
+
         return {
             "gold_pick":             gold,
             "silver_pick":           silver,
@@ -2651,6 +2653,7 @@ class RacingAICore:
             "race_confidence":       race_confidence,
             "full_rankings":         scored,
             "wet_jumps_mode":        _is_wet_jumps(race),
+            "is_jumps":              is_jumps,
             "jumps_check_filter":    jumps_check["jumps_check_filter"],
             "jumps_check_reason":    jumps_check["jumps_check_reason"],
         }
