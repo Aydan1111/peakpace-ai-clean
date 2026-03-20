@@ -1300,16 +1300,18 @@ def canonical_template():
 
 
 # -------------------------------------------------
-# RACE PRE-CHECK — screenshot-based triage tool
-# -------------------------------------------------
+# RACE PRE-CHECK — local manual-form triage tool (no external API, no screenshots)
+# ----------------------------------------------------------------------------------
 
 class RacePrecheckRequest(BaseModel):
-    main_screenshot: str       # base64-encoded image data (without data-URL prefix)
-    pace_screenshot: str       # base64-encoded ATR Pace screenshot
-    draw_screenshot: str       # base64-encoded ATR Draw screenshot
-    main_media_type: str = "image/png"       # e.g. "image/png" or "image/jpeg"
-    pace_media_type: str = "image/png"
-    draw_media_type: str = "image/png"
+    discipline:     str = "Flat"       # "Flat" | "Jumps"
+    runners:        int = 10
+    distance:       str = ""
+    going:          str = "Good"
+    handicap:       str = "No"         # "Yes" | "No"
+    market_shape:   str = "Fairly open"
+    pace_shape:     str = "Some pace"
+    draw_influence: str = "Neutral"
 
 
 class RacePrecheckResponse(BaseModel):
@@ -1317,201 +1319,110 @@ class RacePrecheckResponse(BaseModel):
     short_reason: str
 
 
-def _build_precheck_prompt() -> str:
-    return (
-        "You are a horse racing triage assistant. "
-        "You have been given three screenshots: "
-        "(1) the main race market screen showing odds, field size, race type, prices, and general race structure; "
-        "(2) the ATR pace setup screen; "
-        "(3) the ATR draw screen.\n\n"
-        "Your task is to give a BROAD PRE-CHECK only. "
-        "DO NOT try to pick a winner. DO NOT output Gold/Silver/Dark Horse picks. "
-        "DO NOT do deep horse-by-horse analysis.\n\n"
-        "Judge only at a glance using these signals:\n"
-        "- Field size (fewer runners = clearer)\n"
-        "- Market openness (tight clear favourite vs wide open market)\n"
-        "- Strength / confidence of the favourite's price\n"
-        "- Race type volatility (handicap vs conditions race etc.)\n"
-        "- Draw shape from the ATR draw screen (favoured draw visible or not)\n"
-        "- Pace setup from the ATR pace screen (clear pace scenario or chaotic)\n"
-        "- Whether the race looks generally clear or messy overall\n\n"
-        "Return ONLY a valid JSON object with exactly these two keys:\n"
-        '{ "precheck_confidence": "HIGH" | "MEDIUM" | "LOW", "short_reason": "<one sentence>" }\n\n'
-        "Meanings:\n"
-        "HIGH = clear enough market and race shape for deeper analysis\n"
-        "MEDIUM = some structure but not especially clear\n"
-        "LOW = too open, tactically messy, or too little to read confidently\n\n"
-        "Do not include any other text outside the JSON object."
-    )
-
-
-_PRECHECK_SUPPORTED_TYPES = {"image/png", "image/jpeg", "image/jpg", "image/webp"}
-_PRECHECK_MAX_DIMENSION = 1568  # Anthropic recommends <= 1568px per side
-
-
-def _normalize_precheck_image(b64_data: str, media_type: str):
+def _score_precheck(req: RacePrecheckRequest) -> tuple[str, str]:
     """
-    Decode, validate, optionally resize, and re-encode a screenshot for Anthropic.
-    Returns (normalized_b64: str, normalized_media_type: str).
-    Raises HTTPException(400) if the image is invalid or unsupported.
+    Pure local scoring — no external model, no API calls.
+    Returns (confidence, short_reason).
     """
-    import io as _io
+    score = 0
+    is_flat  = req.discipline == "Flat"
+    is_jumps = req.discipline == "Jumps"
+    runners  = max(1, req.runners)
 
-    # Normalise media type alias
-    norm_type = media_type.strip().lower()
-    if norm_type == "image/jpg":
-        norm_type = "image/jpeg"
+    # Discipline
+    if is_flat:
+        score += 1
 
-    if norm_type not in _PRECHECK_SUPPORTED_TYPES:
-        raise HTTPException(
-            status_code=400,
-            detail="Race Pre-Check failed: unsupported or invalid image upload.",
-        )
+    # Runners: fewer = clearer
+    if runners <= 7:
+        score += 2
+    elif runners <= 12:
+        score += 1
+    elif runners <= 16:
+        score += 0
+    else:
+        score -= 1
 
-    # Decode base64
-    try:
-        raw_bytes = base64.b64decode(b64_data)
-    except Exception:
-        raise HTTPException(
-            status_code=400,
-            detail="Race Pre-Check failed: unsupported or invalid image upload.",
-        )
+    # Going / Ground
+    going_scores = {
+        "Firm":              1,
+        "Good":              1,
+        "Good to Soft":      0,
+        "Soft":             -1 if is_jumps else 0,
+        "Heavy":            -1,
+        "Standard":          1,
+        "Standard to Slow":  0,
+        "Unknown":          -1,
+    }
+    score += going_scores.get(req.going, 0)
 
-    # Open and validate with Pillow
-    try:
-        from PIL import Image as _Image
-        img = _Image.open(_io.BytesIO(raw_bytes))
-        img.verify()  # raises if corrupt
-        # Re-open after verify (verify closes the stream)
-        img = _Image.open(_io.BytesIO(raw_bytes))
-        img = img.convert("RGB")  # ensure consistent mode
-    except Exception:
-        raise HTTPException(
-            status_code=400,
-            detail="Race Pre-Check failed: unsupported or invalid image upload.",
-        )
+    # Handicap
+    if req.handicap == "Yes":
+        score -= 1
+    else:
+        score += 1
 
-    # Resize if either dimension exceeds the limit
-    w, h = img.size
-    if w > _PRECHECK_MAX_DIMENSION or h > _PRECHECK_MAX_DIMENSION:
-        scale = _PRECHECK_MAX_DIMENSION / max(w, h)
-        img = img.resize((int(w * scale), int(h * scale)), _Image.LANCZOS)
+    # Market shape
+    if req.market_shape == "Clear favourite":
+        score += 2
+    elif req.market_shape == "Very open":
+        score -= 2
 
-    # Re-encode as JPEG (compact, universally accepted by Anthropic)
-    buf = _io.BytesIO()
-    img.save(buf, format="JPEG", quality=85)
-    out_b64 = base64.b64encode(buf.getvalue()).decode("ascii")
-    return out_b64, "image/jpeg"
+    # Pace shape
+    if req.pace_shape == "Clear leader":
+        score += 1
+    elif req.pace_shape in ("Weak pace", "Unknown"):
+        score -= 1
 
+    # Draw influence (positive only on Flat when known strong)
+    if req.draw_influence == "Strong" and is_flat:
+        score += 1
+    elif req.draw_influence == "Unknown":
+        score -= 1
 
-def _parse_precheck_response(raw: str) -> RacePrecheckResponse:
-    import json as _json
+    # Composite: soft/heavy + Jumps + large field
+    if req.going in ("Soft", "Heavy") and is_jumps and runners > 14:
+        score -= 1
 
-    parsed = None
-    # First try: parse the full response as JSON
-    try:
-        parsed = _json.loads(raw)
-    except _json.JSONDecodeError:
-        pass
-
-    # Fallback: regex extraction of first JSON object
-    if parsed is None:
-        json_match = re.search(r"\{[^}]+\}", raw, re.DOTALL)
-        if not json_match:
-            raise HTTPException(status_code=502, detail=f"Unexpected model response: {raw[:200]}")
-        try:
-            parsed = _json.loads(json_match.group())
-        except _json.JSONDecodeError:
-            raise HTTPException(status_code=502, detail=f"Could not parse model JSON: {raw[:200]}")
-
-    confidence = str(parsed.get("precheck_confidence", "")).upper()
-    if confidence not in ("HIGH", "MEDIUM", "LOW"):
+    # Map score → confidence
+    if score >= 4:
+        confidence = "HIGH"
+    elif score >= 1:
         confidence = "MEDIUM"
+    else:
+        confidence = "LOW"
 
-    short_reason = str(parsed.get("short_reason", "")).strip()
-    if not short_reason:
-        short_reason = "Unable to determine race quality from screenshots."
+    # Build short reason
+    if confidence == "HIGH":
+        reason = "Clear enough race shape and market structure for deeper analysis."
+    elif confidence == "LOW":
+        if runners > 16:
+            reason = "Very large field makes this race too open to justify full entry."
+        elif req.market_shape == "Very open":
+            reason = "Too open a market to justify full entry."
+        elif req.going == "Heavy":
+            reason = "Heavy ground with limited clarity — too messy to justify full entry."
+        else:
+            reason = "Too open or messy to justify full entry."
+    else:
+        if req.handicap == "Yes" and req.market_shape != "Clear favourite":
+            reason = "Handicap with no clear market leader — borderline, use judgement."
+        elif req.pace_shape in ("Weak pace", "Unknown"):
+            reason = "Weak or unknown pace scenario limits clarity — borderline."
+        else:
+            reason = "Some structure, but not especially clear."
 
-    return RacePrecheckResponse(precheck_confidence=confidence, short_reason=short_reason)
+    return confidence, reason
 
 
 @app.post("/race-precheck")
 def race_precheck(request: RacePrecheckRequest):
     """
-    Broad triage tool: given three screenshots (main race + ATR pace + ATR draw),
-    returns precheck_confidence (HIGH / MEDIUM / LOW) and a short_reason.
-    Does NOT predict winners or output Gold/Silver/Dark Horse picks.
+    Local triage tool: accepts manual form inputs, returns precheck_confidence
+    (HIGH / MEDIUM / LOW) and a short_reason. No external API or model used.
     """
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
-    if not api_key:
-        raise HTTPException(
-            status_code=503,
-            detail="Race Pre-Check is unavailable: ANTHROPIC_API_KEY not configured on server.",
-        )
-
-    try:
-        import anthropic as _anthropic
-    except ImportError:
-        raise HTTPException(
-            status_code=503,
-            detail="Race Pre-Check is unavailable: anthropic package not installed.",
-        )
-
-    client = _anthropic.Anthropic(api_key=api_key)
-
-    # TEMP: bypass image normalization/validation — pass images through as received
-    main_b64, main_mime = request.main_screenshot, request.main_media_type
-    pace_b64, pace_mime = request.pace_screenshot, request.pace_media_type
-    draw_b64, draw_mime = request.draw_screenshot, request.draw_media_type
-
-    try:
-        message = client.messages.create(
-            model="claude-sonnet-4-6",
-            max_tokens=200,
-            messages=[
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "image",
-                            "source": {
-                                "type": "base64",
-                                "media_type": main_mime,
-                                "data": main_b64,
-                            },
-                        },
-                        {
-                            "type": "image",
-                            "source": {
-                                "type": "base64",
-                                "media_type": pace_mime,
-                                "data": pace_b64,
-                            },
-                        },
-                        {
-                            "type": "image",
-                            "source": {
-                                "type": "base64",
-                                "media_type": draw_mime,
-                                "data": draw_b64,
-                            },
-                        },
-                        {"type": "text", "text": _build_precheck_prompt()},
-                    ],
-                }
-            ],
-        )
-    except Exception as e:
-        print(f"RACE_PRECHECK_ANTHROPIC_ERROR: {str(e)}")
-        print(f"RACE_PRECHECK_ANTHROPIC_ERROR_REPR: {repr(e)}")
-        raise HTTPException(
-            status_code=502,
-            detail="Race Pre-Check failed: upstream vision service error.",
-        )
-
-    raw = message.content[0].text.strip()
-    result = _parse_precheck_response(raw)
-    return {"precheck_confidence": result.precheck_confidence, "short_reason": result.short_reason}
+    confidence, reason = _score_precheck(request)
+    return {"precheck_confidence": confidence, "short_reason": reason}
 
 
 @app.post("/debug-parse")

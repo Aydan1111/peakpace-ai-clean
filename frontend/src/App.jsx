@@ -262,14 +262,6 @@ export default function App() {
   // Dark horse toggle — off by default; Gold + Silver only when false
   const [darkHorseEnabled, setDarkHorseEnabled] = useState(false);
 
-  // Race Pre-Check state — isolated from main analysis state
-  const [precheckMainShot, setPrecheckMainShot] = useState(null);
-  const [precheckPaceShot, setPrecheckPaceShot] = useState(null);
-  const [precheckDrawShot, setPrecheckDrawShot] = useState(null);
-  const [precheckResult, setPrecheckResult] = useState(null);
-  const [precheckLoading, setPrecheckLoading] = useState(false);
-  const [precheckError, setPrecheckError] = useState(null);
-
   // When switching to guided mode for the first time, fetch and pre-populate
   // the canonical template from the backend.
   const handleModeChange = (newMode) => {
@@ -296,48 +288,6 @@ export default function App() {
   const handleGuidedChange = (val) => setGuidedText(val);
   const handleRaceChange  = (val) => setRace(val);
   const handleRunnersChange = (val) => setRunners(val);
-
-  // Strip the "data:image/...;base64," prefix from a data-URL to get raw base64
-  const stripDataPrefix = (dataUrl) => {
-    const idx = dataUrl.indexOf(",");
-    return idx >= 0 ? dataUrl.slice(idx + 1) : dataUrl;
-  };
-
-  const runPrecheck = async () => {
-    if (!precheckMainShot || !precheckPaceShot || !precheckDrawShot) return;
-    setPrecheckLoading(true);
-    setPrecheckError(null);
-    setPrecheckResult(null);
-    try {
-      const payload = {
-        main_screenshot:  stripDataPrefix(precheckMainShot.preview),
-        pace_screenshot:  stripDataPrefix(precheckPaceShot.preview),
-        draw_screenshot:  stripDataPrefix(precheckDrawShot.preview),
-        main_media_type:  precheckMainShot.mediaType || "image/png",
-        pace_media_type:  precheckPaceShot.mediaType || "image/png",
-        draw_media_type:  precheckDrawShot.mediaType || "image/png",
-      };
-      const res = await fetch(`${API_BASE}/race-precheck`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      if (!res.ok) {
-        const raw = await res.text().catch(() => "");
-        throw new Error(extractErrorMsg(raw, res.status));
-      }
-      const data = await res.json();
-      setPrecheckResult(data);
-    } catch (err) {
-      if (err instanceof TypeError && err.message === "Failed to fetch") {
-        setPrecheckError("Cannot reach backend — check API URL or CORS.");
-      } else {
-        setPrecheckError(err.message || "Pre-check request failed");
-      }
-    } finally {
-      setPrecheckLoading(false);
-    }
-  };
 
   // Only require horse name + at least 2 runners for manual mode.
   const canSubmitManual =
@@ -493,18 +443,7 @@ export default function App() {
           <ModeToggle mode={inputMode} onChange={handleModeChange} />
 
           {inputMode === "precheck" ? (
-            <RacePreCheck
-              mainShot={precheckMainShot}
-              paceShot={precheckPaceShot}
-              drawShot={precheckDrawShot}
-              onMainChange={setPrecheckMainShot}
-              onPaceChange={setPrecheckPaceShot}
-              onDrawChange={setPrecheckDrawShot}
-              onRun={runPrecheck}
-              loading={precheckLoading}
-              result={precheckResult}
-              error={precheckError}
-            />
+            <RacePreCheck />
           ) : inputMode === "manual" ? (
             <>
               <RaceForm race={race} onChange={handleRaceChange} />

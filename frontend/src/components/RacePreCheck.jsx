@@ -1,126 +1,228 @@
-import { useRef } from "react";
+import { useState } from "react";
 
-/**
- * RacePreCheck — screenshot-based broad triage tool.
- *
- * Requires THREE screenshots before the Run Pre-Check button is enabled:
- *   1. Main Race Screenshot  (market shape, prices, field size, race structure)
- *   2. ATR Pace Screenshot   (pace setup)
- *   3. ATR Draw Screenshot   (draw setup)
- *
- * Props:
- *   mainShot       – { file, preview, mediaType } | null
- *   paceShot       – { file, preview, mediaType } | null
- *   drawShot       – { file, preview, mediaType } | null
- *   onMainChange   – (shotObj | null) => void
- *   onPaceChange   – (shotObj | null) => void
- *   onDrawChange   – (shotObj | null) => void
- *   onRun          – () => void
- *   loading        – bool
- *   result         – { precheck_confidence, short_reason } | null
- *   error          – string | null
- */
-export default function RacePreCheck({
-  mainShot,
-  paceShot,
-  drawShot,
-  onMainChange,
-  onPaceChange,
-  onDrawChange,
-  onRun,
-  loading,
-  result,
-  error,
-}) {
-  const mainRef = useRef(null);
-  const paceRef = useRef(null);
-  const drawRef = useRef(null);
+// ---------------------------------------------------------------------------
+// Local scoring — no API, no external model, fully offline
+// ---------------------------------------------------------------------------
 
-  const allPresent = !!mainShot && !!paceShot && !!drawShot;
-  const canRun = allPresent && !loading;
+function computePrecheck(form) {
+  let score = 0;
+  const runners = parseInt(form.runners, 10) || 10;
+  const isFlat = form.discipline === "Flat";
+  const isJumps = form.discipline === "Jumps";
 
-  const handleFile = (e, setter) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      setter({ file, preview: ev.target.result, mediaType: file.type || "image/png" });
-    };
-    reader.readAsDataURL(file);
-    // Reset input so same file can be re-selected
-    e.target.value = "";
+  // Discipline: Flat is generally clearer
+  if (isFlat) score += 1;
+
+  // Runners: fewer = clearer
+  if (runners <= 7)       score += 2;
+  else if (runners <= 12) score += 1;
+  else if (runners <= 16) score += 0;
+  else                    score -= 1;  // 17+ runners: very negative
+
+  // Going / Ground
+  const goingScore = {
+    Firm:              1,
+    Good:              1,
+    "Good to Soft":    0,
+    Soft:              isJumps ? -1 : 0,
+    Heavy:            -1,
+    Standard:          1,
+    "Standard to Slow": 0,
+    Unknown:          -1,
   };
+  score += goingScore[form.going] ?? 0;
 
-  const clearShot = (setter, inputRef) => {
-    setter(null);
-    if (inputRef.current) inputRef.current.value = "";
-  };
+  // Handicap: yes = more volatile
+  if (form.handicap === "Yes") score -= 1;
+  else score += 1;
 
-  // Waiting message shown when not all three screenshots are uploaded
-  const uploaded = [mainShot, paceShot, drawShot].filter(Boolean).length;
-  let waitingMsg = null;
-  if (uploaded > 0 && uploaded < 3) {
-    const missing = [];
-    if (!mainShot) missing.push("main race screenshot");
-    if (!paceShot) missing.push("ATR pace screenshot");
-    if (!drawShot) missing.push("ATR draw screenshot");
-    waitingMsg = `Waiting for ${missing.join(" and ")}`;
+  // Market shape
+  if (form.marketShape === "Clear favourite") score += 2;
+  else if (form.marketShape === "Very open")  score -= 2;
+  // "Fairly open" = 0
+
+  // Pace shape
+  if (form.paceShape === "Clear leader") score += 1;
+  else if (form.paceShape === "Weak pace")  score -= 1;
+  else if (form.paceShape === "Unknown")    score -= 1;
+  // "Some pace" = 0
+
+  // Draw influence — only meaningful on Flat; unknown = slight negative
+  if (form.drawInfluence === "Strong" && isFlat) score += 1;
+  else if (form.drawInfluence === "Unknown")      score -= 1;
+  // Moderate / Neutral = 0
+
+  // Composite penalty: soft/heavy + Jumps + big field
+  if ((form.going === "Soft" || form.going === "Heavy") && isJumps && runners > 14) {
+    score -= 1;
   }
+
+  if (score >= 4) return "HIGH";
+  if (score >= 1) return "MEDIUM";
+  return "LOW";
+}
+
+function buildReason(form, confidence) {
+  const runners = parseInt(form.runners, 10) || 10;
+  if (confidence === "HIGH") {
+    return "Clear enough race shape and market structure for deeper analysis.";
+  }
+  if (confidence === "LOW") {
+    if (runners > 16) return "Very large field makes this race too open to justify full entry.";
+    if (form.marketShape === "Very open") return "Too open a market to justify full entry.";
+    if (form.going === "Heavy") return "Heavy ground with limited clarity — too messy to justify full entry.";
+    return "Too open or messy to justify full entry.";
+  }
+  // MEDIUM
+  if (form.handicap === "Yes" && form.marketShape !== "Clear favourite") {
+    return "Handicap with no clear market leader — borderline, use judgement.";
+  }
+  if (form.paceShape === "Weak pace" || form.paceShape === "Unknown") {
+    return "Weak or unknown pace scenario limits clarity — borderline.";
+  }
+  return "Some structure, but not especially clear.";
+}
+
+// ---------------------------------------------------------------------------
+// Default form state
+// ---------------------------------------------------------------------------
+
+const DEFAULT_FORM = {
+  discipline:    "Flat",
+  runners:       "",
+  distance:      "",
+  going:         "Good",
+  handicap:      "No",
+  marketShape:   "Fairly open",
+  paceShape:     "Some pace",
+  drawInfluence: "Neutral",
+};
+
+// ---------------------------------------------------------------------------
+// Main component — self-contained, no external calls
+// ---------------------------------------------------------------------------
+
+export default function RacePreCheck() {
+  const [form, setForm]     = useState(DEFAULT_FORM);
+  const [result, setResult] = useState(null);
+
+  const set = (key, val) => {
+    setForm((prev) => ({ ...prev, [key]: val }));
+    setResult(null); // clear result on any change
+  };
+
+  const runPrecheck = () => {
+    const confidence = computePrecheck(form);
+    const short_reason = buildReason(form, confidence);
+    setResult({ precheck_confidence: confidence, short_reason });
+  };
+
+  const canRun = form.runners !== "" && parseInt(form.runners, 10) > 0;
 
   return (
     <div className="space-y-6">
 
-      {/* ── Upload Areas ───────────────────────────────────────────────── */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <UploadArea
-          label="Main Race Screenshot"
-          hint="Market odds · field size · race type · race structure"
-          shot={mainShot}
-          inputRef={mainRef}
-          onSelect={(e) => handleFile(e, onMainChange)}
-          onClear={() => clearShot(onMainChange, mainRef)}
-        />
-        <UploadArea
-          label="ATR Pace Screenshot"
-          hint="Pace setup"
-          shot={paceShot}
-          inputRef={paceRef}
-          onSelect={(e) => handleFile(e, onPaceChange)}
-          onClear={() => clearShot(onPaceChange, paceRef)}
-        />
-        <UploadArea
-          label="ATR Draw Screenshot"
-          hint="Draw setup"
-          shot={drawShot}
-          inputRef={drawRef}
-          onSelect={(e) => handleFile(e, onDrawChange)}
-          onClear={() => clearShot(onDrawChange, drawRef)}
-        />
-      </div>
+      {/* ── Form ────────────────────────────────────────────────────────── */}
+      <div className="rounded-xl border border-border bg-surface p-5 space-y-5">
 
-      {/* ── Waiting Message ─────────────────────────────────────────────── */}
-      {waitingMsg && (
-        <p className="text-center text-sm text-text-dim italic">{waitingMsg}</p>
-      )}
+        <p className="text-xs font-semibold uppercase tracking-widest text-text-dim text-center">
+          Is this race worth betting on?
+        </p>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+
+          {/* 1. Discipline */}
+          <FormRow label="Discipline">
+            <RadioGroup
+              options={["Flat", "Jumps"]}
+              value={form.discipline}
+              onChange={(v) => set("discipline", v)}
+            />
+          </FormRow>
+
+          {/* 2. Runners */}
+          <FormRow label="Runners">
+            <input
+              type="number"
+              min="1"
+              max="40"
+              placeholder="e.g. 12"
+              value={form.runners}
+              onChange={(e) => set("runners", e.target.value)}
+              className="field-input w-full"
+            />
+          </FormRow>
+
+          {/* 3. Distance */}
+          <FormRow label="Distance">
+            <input
+              type="text"
+              placeholder="e.g. 1m4f, 2m, 7f"
+              value={form.distance}
+              onChange={(e) => set("distance", e.target.value)}
+              className="field-input w-full"
+            />
+          </FormRow>
+
+          {/* 4. Going / Ground */}
+          <FormRow label="Going / Ground">
+            <Select
+              value={form.going}
+              onChange={(v) => set("going", v)}
+              options={["Firm", "Good", "Good to Soft", "Soft", "Heavy", "Standard", "Standard to Slow", "Unknown"]}
+            />
+          </FormRow>
+
+          {/* 5. Handicap */}
+          <FormRow label="Handicap?">
+            <RadioGroup
+              options={["Yes", "No"]}
+              value={form.handicap}
+              onChange={(v) => set("handicap", v)}
+            />
+          </FormRow>
+
+          {/* 6. Market Shape */}
+          <FormRow label="Market Shape">
+            <Select
+              value={form.marketShape}
+              onChange={(v) => set("marketShape", v)}
+              options={["Clear favourite", "Fairly open", "Very open"]}
+            />
+          </FormRow>
+
+          {/* 7. Pace Shape */}
+          <FormRow label="Pace Shape">
+            <Select
+              value={form.paceShape}
+              onChange={(v) => set("paceShape", v)}
+              options={["Clear leader", "Some pace", "Weak pace", "Unknown"]}
+            />
+          </FormRow>
+
+          {/* 8. Draw Influence */}
+          <FormRow label="Draw Influence">
+            <Select
+              value={form.drawInfluence}
+              onChange={(v) => set("drawInfluence", v)}
+              options={["Strong", "Moderate", "Neutral", "Unknown"]}
+            />
+          </FormRow>
+
+        </div>
+      </div>
 
       {/* ── Run Button ──────────────────────────────────────────────────── */}
       <div className="flex justify-center">
         <button
           type="button"
           disabled={!canRun}
-          onClick={onRun}
+          onClick={runPrecheck}
           className="btn-primary text-base px-10 py-3"
         >
-          {loading ? "Running Pre-Check…" : "Run Pre-Check"}
+          Run Pre-Check
         </button>
       </div>
-
-      {/* ── Error ───────────────────────────────────────────────────────── */}
-      {error && (
-        <div className="bg-red-500/10 border border-red-500/40 rounded-lg p-4 text-red-400 text-sm text-center">
-          {error}
-        </div>
-      )}
 
       {/* ── Result ──────────────────────────────────────────────────────── */}
       {result && <PrecheckResult result={result} />}
@@ -128,70 +230,53 @@ export default function RacePreCheck({
   );
 }
 
+// ---------------------------------------------------------------------------
+// Sub-components
+// ---------------------------------------------------------------------------
 
-/* ── Sub-components ──────────────────────────────────────────────────────── */
-
-function UploadArea({ label, hint, shot, inputRef, onSelect, onClear }) {
+function FormRow({ label, children }) {
   return (
-    <div className="rounded-xl border border-border bg-surface p-4 space-y-3">
-      <div>
-        <p className="text-sm font-semibold text-text">{label}</p>
-        <p className="text-xs text-text-dim mt-0.5">{hint}</p>
-      </div>
-
-      {shot ? (
-        <div className="relative">
-          <img
-            src={shot.preview}
-            alt={label}
-            className="w-full rounded-lg object-contain max-h-48 border border-border"
-          />
-          <button
-            type="button"
-            onClick={onClear}
-            className="absolute top-1 right-1 rounded-full bg-surface/80 border border-border px-2 py-0.5 text-xs text-text-dim hover:text-text transition-colors"
-          >
-            Remove
-          </button>
-        </div>
-      ) : (
-        <button
-          type="button"
-          onClick={() => inputRef.current?.click()}
-          className="w-full rounded-lg border-2 border-dashed border-border hover:border-gold/60 bg-surface-light/30 hover:bg-surface-light/60 transition-colors py-8 flex flex-col items-center gap-2"
-        >
-          <UploadIcon />
-          <span className="text-xs text-text-dim">Click to upload screenshot</span>
-        </button>
-      )}
-
-      <input
-        ref={inputRef}
-        type="file"
-        accept="image/*"
-        className="hidden"
-        onChange={onSelect}
-      />
+    <div className="space-y-1">
+      <label className="block text-xs font-semibold text-text-dim uppercase tracking-wide">
+        {label}
+      </label>
+      {children}
     </div>
   );
 }
 
-function UploadIcon() {
+function RadioGroup({ options, value, onChange }) {
   return (
-    <svg
-      xmlns="http://www.w3.org/2000/svg"
-      className="h-6 w-6 text-text-dim"
-      fill="none"
-      viewBox="0 0 24 24"
-      stroke="currentColor"
-      strokeWidth={1.5}
+    <div className="flex gap-2 flex-wrap">
+      {options.map((opt) => (
+        <button
+          key={opt}
+          type="button"
+          onClick={() => onChange(opt)}
+          className={`px-3 py-1.5 rounded-md text-sm font-medium border transition-colors ${
+            value === opt
+              ? "bg-gold/20 border-gold/60 text-gold"
+              : "bg-surface-light/30 border-border text-text-dim hover:text-text hover:border-border/80"
+          }`}
+        >
+          {opt}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function Select({ value, onChange, options }) {
+  return (
+    <select
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      className="field-input w-full"
     >
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5"
-      />
-    </svg>
+      {options.map((opt) => (
+        <option key={opt} value={opt}>{opt}</option>
+      ))}
+    </select>
   );
 }
 
