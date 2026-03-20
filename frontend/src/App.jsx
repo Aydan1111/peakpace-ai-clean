@@ -6,6 +6,7 @@ import PasteInput from "./components/PasteInput";
 import ResultsPanel from "./components/ResultsPanel";
 import Spinner from "./components/Spinner";
 import RacePreCheck from "./components/RacePreCheck";
+import JumpsCheckFilter from "./components/JumpsCheckFilter";
 
 /*
   CLEAN PRODUCTION API SETUP
@@ -444,6 +445,8 @@ export default function App() {
 
           {inputMode === "precheck" ? (
             <RacePreCheck />
+          ) : inputMode === "jumps" ? (
+            <JumpsCheckFilter />
           ) : inputMode === "manual" ? (
             <>
               <RaceForm race={race} onChange={handleRaceChange} />
@@ -457,8 +460,8 @@ export default function App() {
             />
           )}
 
-          {/* Dark Horse Toggle + Analyze button — hidden in precheck mode */}
-          {inputMode !== "precheck" && (
+          {/* Dark Horse Toggle + Analyze button — hidden in precheck and jumps modes */}
+          {inputMode !== "precheck" && inputMode !== "jumps" && (
             <>
               <div className="flex justify-center">
                 <label className="flex items-center gap-3 cursor-pointer select-none group">
