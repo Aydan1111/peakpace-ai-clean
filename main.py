@@ -1437,7 +1437,8 @@ def race_precheck(request: RacePrecheckRequest):
                 }
             ],
         )
-    except Exception:
+    except Exception as e:
+        print(f"[race-precheck] Anthropic API error: {e}")
         raise HTTPException(
             status_code=502,
             detail="Race Pre-Check failed: upstream vision service error.",
