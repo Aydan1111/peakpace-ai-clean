@@ -1345,6 +1345,65 @@ def _build_precheck_prompt() -> str:
     )
 
 
+_PRECHECK_SUPPORTED_TYPES = {"image/png", "image/jpeg", "image/jpg", "image/webp"}
+_PRECHECK_MAX_DIMENSION = 1568  # Anthropic recommends <= 1568px per side
+
+
+def _normalize_precheck_image(b64_data: str, media_type: str):
+    """
+    Decode, validate, optionally resize, and re-encode a screenshot for Anthropic.
+    Returns (normalized_b64: str, normalized_media_type: str).
+    Raises HTTPException(400) if the image is invalid or unsupported.
+    """
+    import io as _io
+
+    # Normalise media type alias
+    norm_type = media_type.strip().lower()
+    if norm_type == "image/jpg":
+        norm_type = "image/jpeg"
+
+    if norm_type not in _PRECHECK_SUPPORTED_TYPES:
+        raise HTTPException(
+            status_code=400,
+            detail="Race Pre-Check failed: unsupported or invalid image upload.",
+        )
+
+    # Decode base64
+    try:
+        raw_bytes = base64.b64decode(b64_data)
+    except Exception:
+        raise HTTPException(
+            status_code=400,
+            detail="Race Pre-Check failed: unsupported or invalid image upload.",
+        )
+
+    # Open and validate with Pillow
+    try:
+        from PIL import Image as _Image
+        img = _Image.open(_io.BytesIO(raw_bytes))
+        img.verify()  # raises if corrupt
+        # Re-open after verify (verify closes the stream)
+        img = _Image.open(_io.BytesIO(raw_bytes))
+        img = img.convert("RGB")  # ensure consistent mode
+    except Exception:
+        raise HTTPException(
+            status_code=400,
+            detail="Race Pre-Check failed: unsupported or invalid image upload.",
+        )
+
+    # Resize if either dimension exceeds the limit
+    w, h = img.size
+    if w > _PRECHECK_MAX_DIMENSION or h > _PRECHECK_MAX_DIMENSION:
+        scale = _PRECHECK_MAX_DIMENSION / max(w, h)
+        img = img.resize((int(w * scale), int(h * scale)), _Image.LANCZOS)
+
+    # Re-encode as JPEG (compact, universally accepted by Anthropic)
+    buf = _io.BytesIO()
+    img.save(buf, format="JPEG", quality=85)
+    out_b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+    return out_b64, "image/jpeg"
+
+
 def _parse_precheck_response(raw: str) -> RacePrecheckResponse:
     import json as _json
 
@@ -1400,6 +1459,11 @@ def race_precheck(request: RacePrecheckRequest):
 
     client = _anthropic.Anthropic(api_key=api_key)
 
+    # Normalize all three screenshots before sending upstream
+    main_b64, main_mime = _normalize_precheck_image(request.main_screenshot, request.main_media_type)
+    pace_b64, pace_mime = _normalize_precheck_image(request.pace_screenshot, request.pace_media_type)
+    draw_b64, draw_mime = _normalize_precheck_image(request.draw_screenshot, request.draw_media_type)
+
     try:
         message = client.messages.create(
             model="claude-sonnet-4-6",
@@ -1412,24 +1476,24 @@ def race_precheck(request: RacePrecheckRequest):
                             "type": "image",
                             "source": {
                                 "type": "base64",
-                                "media_type": request.main_media_type,
-                                "data": request.main_screenshot,
+                                "media_type": main_mime,
+                                "data": main_b64,
                             },
                         },
                         {
                             "type": "image",
                             "source": {
                                 "type": "base64",
-                                "media_type": request.pace_media_type,
-                                "data": request.pace_screenshot,
+                                "media_type": pace_mime,
+                                "data": pace_b64,
                             },
                         },
                         {
                             "type": "image",
                             "source": {
                                 "type": "base64",
-                                "media_type": request.draw_media_type,
-                                "data": request.draw_screenshot,
+                                "media_type": draw_mime,
+                                "data": draw_b64,
                             },
                         },
                         {"type": "text", "text": _build_precheck_prompt()},
@@ -1438,8 +1502,8 @@ def race_precheck(request: RacePrecheckRequest):
             ],
         )
     except Exception as e:
-        print(f"[race-precheck] Anthropic API error: {e}")
-        print(f"[race-precheck] Anthropic API error repr: {repr(e)}")
+        print(f"RACE_PRECHECK_ANTHROPIC_ERROR: {str(e)}")
+        print(f"RACE_PRECHECK_ANTHROPIC_ERROR_REPR: {repr(e)}")
         raise HTTPException(
             status_code=502,
             detail="Race Pre-Check failed: upstream vision service error.",
