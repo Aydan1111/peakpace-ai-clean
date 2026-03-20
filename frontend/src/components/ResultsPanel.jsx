@@ -1,3 +1,5 @@
+import { useState } from "react";
+
 const PICK_CONFIG = {
   GOLD: {
     emoji: "\u{1F947}",
@@ -25,16 +27,26 @@ const PICK_CONFIG = {
 export default function ResultsPanel({ result }) {
   if (!result) return null;
 
-  // Map backend shape → UI shape
-  const goldName = result.gold_pick?.name;
-  const silverName = result.silver_pick?.name;
-  const darkName = result.dark_horse?.name;
+  const [excludeSilver, setExcludeSilver] = useState(false);
+  const [excludeDark, setExcludeDark] = useState(false);
 
-  const picks = [
+  // Map backend shape → UI shape
+  const goldName   = result.gold_pick?.name;
+  const silverName = result.silver_pick?.name;
+  const darkName   = result.dark_horse?.name;
+
+  const allPicks = [
     result.gold_pick && { pick: "GOLD", name: goldName, model_alignment: result.gold_pick.confidence, why: result.gold_pick.label, writeup: result.gold_pick.writeup, market_flag: result.gold_pick.market_flag },
     result.silver_pick && { pick: "SILVER", name: silverName, model_alignment: result.silver_pick.confidence, why: result.silver_pick.label, writeup: result.silver_pick.writeup, market_flag: result.silver_pick.market_flag },
     result.dark_horse && darkName !== silverName && { pick: "DARK HORSE", name: darkName, model_alignment: result.dark_horse.confidence, why: result.dark_horse.label, writeup: result.dark_horse.writeup },
   ].filter(Boolean);
+
+  // Display-only exclusion — does NOT affect rankings or scores
+  const picks = allPicks.filter((p) => {
+    if (p.pick === "SILVER" && excludeSilver) return false;
+    if (p.pick === "DARK HORSE" && excludeDark) return false;
+    return true;
+  });
 
   const engine_version = "PeakPace v1 [build:7748e38]";
   const note = "Scores are model estimates — always verify with your own analysis.";
@@ -44,6 +56,12 @@ export default function ResultsPanel({ result }) {
     : raceConf === "MEDIUM"
     ? "bg-gold/20 text-gold border-gold/40"
     : "bg-gray-500/20 text-gray-300 border-gray-500/40";
+
+  const jumpsFilterOn  = result.jumps_check_filter === "ON";
+  const jumpsFilterReason = result.jumps_check_reason || "";
+
+  const hasSilver = !!result.silver_pick;
+  const hasDark   = !!(result.dark_horse && darkName !== silverName);
 
   return (
     <section className="bg-surface rounded-xl border border-border p-6 space-y-6">
@@ -57,6 +75,59 @@ export default function ResultsPanel({ result }) {
           </span>
         )}
       </div>
+
+      {/* Jumps Check Filter advisory — only shown for Jumps races when ON */}
+      {jumpsFilterOn && (
+        <div className="rounded-lg border border-orange-400/50 bg-orange-400/10 p-4 space-y-1">
+          <div className="flex items-center gap-2">
+            <span className="text-orange-300 text-sm font-bold uppercase tracking-wider">
+              ⚠ Jumps Check Filter: ON
+            </span>
+          </div>
+          <p className="text-orange-200 text-xs leading-relaxed">
+            {jumpsFilterReason}
+          </p>
+          <p className="text-orange-300/70 text-xs italic">
+            Advisory only — rankings and picks are unchanged. Use the exclude controls below if needed.
+          </p>
+        </div>
+      )}
+
+      {/* Manual exclude controls for Silver and Dark Horse */}
+      {(hasSilver || hasDark) && (
+        <div className="flex flex-wrap gap-3 items-center">
+          <span className="text-xs text-text-dim uppercase tracking-wider">Manual exclude:</span>
+          {hasSilver && (
+            <button
+              onClick={() => setExcludeSilver((v) => !v)}
+              className={`text-xs px-3 py-1 rounded border transition-colors ${
+                excludeSilver
+                  ? "border-red-500/60 bg-red-500/20 text-red-300"
+                  : "border-gray-400/40 bg-gray-400/10 text-gray-300 hover:border-red-400/50 hover:bg-red-400/10 hover:text-red-300"
+              }`}
+            >
+              {excludeSilver ? "✕ Silver excluded" : "✕ Exclude Silver"}
+            </button>
+          )}
+          {hasDark && (
+            <button
+              onClick={() => setExcludeDark((v) => !v)}
+              className={`text-xs px-3 py-1 rounded border transition-colors ${
+                excludeDark
+                  ? "border-red-500/60 bg-red-500/20 text-red-300"
+                  : "border-purple-400/40 bg-purple-400/10 text-purple-300 hover:border-red-400/50 hover:bg-red-400/10 hover:text-red-300"
+              }`}
+            >
+              {excludeDark ? "✕ Dark Horse excluded" : "✕ Exclude Dark Horse"}
+            </button>
+          )}
+          {(excludeSilver || excludeDark) && (
+            <span className="text-xs text-text-dim italic opacity-60">
+              Display only — model scores unchanged
+            </span>
+          )}
+        </div>
+      )}
 
       {/* Top Picks */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -113,4 +184,3 @@ export default function ResultsPanel({ result }) {
     </section>
   );
 }
-

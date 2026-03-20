@@ -698,6 +698,84 @@ def _draw_pace_combo_multiplier(runner: Runner, runners: List["Runner"],
 # CONFIDENCE SYSTEM  (race + per-pick)
 # ============================================================
 
+def _jumps_check_filter(
+    race: "RaceInfo",
+    scored: list,
+    race_confidence: str,
+    norm_prob: Dict[str, float],
+    odds_decimal: Dict[str, float],
+) -> dict:
+    """Advisory-only Jumps Check Filter.
+
+    Fires ON when a Jumps race shows no standout top-2 market or model
+    profile — suggesting the better betting angle may be one value/place
+    horse underneath rather than the market leaders.
+
+    Checks three independent signals and fires when ≥2 point to 'no standout':
+      1. Model score gap — top 2 model scores not clearly separated.
+      2. Market dominance — top market horse probability not significantly
+         above field average (needs odds to be supplied).
+      3. Trainer/connections profile — top 2 model horses do not carry a
+         clearly above-average trainer+jockey combination score.
+
+    Does NOT alter rankings, scores, or pick selection in any way.
+    """
+    is_jumps = race.discipline == "Jumps" or _is_nh(race.race_type)
+    if not is_jumps or len(scored) < 3:
+        return {"jumps_check_filter": "OFF", "jumps_check_reason": ""}
+
+    # HIGH confidence implies a clear standout exists — no advisory needed.
+    if race_confidence == "HIGH":
+        return {"jumps_check_filter": "OFF", "jumps_check_reason": ""}
+
+    top_score = scored[0].get("score", 0)
+    if top_score <= 0:
+        return {"jumps_check_filter": "OFF", "jumps_check_reason": ""}
+
+    # ── Signal 1: Model score gap ──────────────────────────────────────────
+    # A gap < 12% between 1st and 2nd model scores = no standout at the top.
+    second_score = scored[1].get("score", 0)
+    model_gap = (top_score - second_score) / top_score
+    model_no_standout = model_gap < 0.12
+
+    # ── Signal 2: Market dominance ─────────────────────────────────────────
+    # Uses norm_prob (normalized implied market probabilities, sum = 1.0).
+    # A genuine market standout has probability ≥ 2× the field average.
+    # If odds are absent we treat the signal as inconclusive (False = no flag).
+    market_no_standout = False
+    if norm_prob and len(norm_prob) >= 2:
+        avg_prob = 1.0 / len(norm_prob)
+        mkt_sorted = sorted(norm_prob.values(), reverse=True)
+        top1_prob  = mkt_sorted[0]
+        # Top market horse probability not clearly above average → no standout
+        market_no_standout = top1_prob < avg_prob * 2.0
+
+    # ── Signal 3: Trainer/connections profile ──────────────────────────────
+    # `connections` = trainer_mult × jockey_mult × combo_mult (stored on each
+    # scored entry as a permanent field; temp fields stripped before this call).
+    # Top 2 model horses should carry above-average connections to look
+    # genuinely standout.  Threshold: 4% above field average.
+    field_conns = [h.get("connections", 1.0) for h in scored]
+    field_conn_avg = sum(field_conns) / len(field_conns) if field_conns else 1.0
+    top1_conn = scored[0].get("connections", 1.0)
+    top2_conn = scored[1].get("connections", 1.0)
+    conn_no_standout = (top1_conn < field_conn_avg * 1.04
+                        and top2_conn < field_conn_avg * 1.04)
+
+    # ── Decision: ≥2 of 3 signals → filter ON ─────────────────────────────
+    signal_count = sum([model_no_standout, market_no_standout, conn_no_standout])
+    if signal_count >= 2:
+        if norm_prob and market_no_standout:
+            reason = "Top of market lacks a standout jumps profile in an open race."
+        else:
+            reason = "No clear standout among the market leaders in this jumps race."
+        return {"jumps_check_filter": "ON", "jumps_check_reason": reason}
+
+    return {"jumps_check_filter": "OFF", "jumps_check_reason": ""}
+
+
+# ============================================================
+
 def _race_confidence_label(
     scored: list,
     race: RaceInfo,
@@ -2563,11 +2641,16 @@ class RacingAICore:
             gold["confidence"], dark["confidence"] = g, d
         # ────────────────────────────────────────────────────────────────────
 
+        jumps_check = _jumps_check_filter(
+            race, scored, race_confidence, _norm_prob, _odds_decimal)
+
         return {
-            "gold_pick":       gold,
-            "silver_pick":     silver,
-            "dark_horse":      dark,
-            "race_confidence": race_confidence,
-            "full_rankings":   scored,
-            "wet_jumps_mode":  _is_wet_jumps(race),
+            "gold_pick":             gold,
+            "silver_pick":           silver,
+            "dark_horse":            dark,
+            "race_confidence":       race_confidence,
+            "full_rankings":         scored,
+            "wet_jumps_mode":        _is_wet_jumps(race),
+            "jumps_check_filter":    jumps_check["jumps_check_filter"],
+            "jumps_check_reason":    jumps_check["jumps_check_reason"],
         }
