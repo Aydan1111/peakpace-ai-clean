@@ -9,6 +9,12 @@ export default function ModeToggle({ mode, onChange }) {
           Race Pre-Check
         </ToggleButton>
         <ToggleButton
+          active={mode === "jumps"}
+          onClick={() => onChange("jumps")}
+        >
+          Jumps Check Filter
+        </ToggleButton>
+        <ToggleButton
           active={mode === "manual"}
           onClick={() => onChange("manual")}
         >

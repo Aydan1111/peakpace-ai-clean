@@ -57,10 +57,6 @@ export default function ResultsPanel({ result }) {
     ? "bg-gold/20 text-gold border-gold/40"
     : "bg-gray-500/20 text-gray-300 border-gray-500/40";
 
-  const isJumps        = !!result.is_jumps;
-  const jumpsFilterOn  = result.jumps_check_filter === "ON";
-  const jumpsFilterReason = result.jumps_check_reason || "";
-
   const hasSilver = !!result.silver_pick;
   const hasDark   = !!(result.dark_horse && darkName !== silverName);
 
@@ -113,55 +109,8 @@ export default function ResultsPanel({ result }) {
         )}
       </div>
 
-      {/* ── Jumps Check Filter — visible on ALL Jumps races, hidden on Flat ── */}
-      {isJumps && (
-        <div className={`rounded-xl border-2 p-4 space-y-3 ${
-          jumpsFilterOn
-            ? "border-orange-400/70 bg-orange-400/10"
-            : "border-gray-600/50 bg-gray-700/20"
-        }`}>
-          <div className="flex items-center justify-between flex-wrap gap-2">
-            <span className="text-sm font-bold uppercase tracking-wider text-orange-200">
-              Jumps Check Filter
-            </span>
-            <span className={`text-xs font-bold uppercase tracking-wider px-2 py-1 rounded border ${
-              jumpsFilterOn
-                ? "border-orange-400/60 bg-orange-400/20 text-orange-300"
-                : "border-gray-500/50 bg-gray-500/10 text-gray-400"
-            }`}>
-              {jumpsFilterOn ? "ON" : "OFF"}
-            </span>
-          </div>
-
-          {jumpsFilterOn ? (
-            <>
-              <p className="text-orange-200 text-xs leading-relaxed font-medium">
-                ⚠ {jumpsFilterReason}
-              </p>
-              <p className="text-orange-300/80 text-xs leading-relaxed border-l-2 border-orange-400/50 pl-3">
-                Market leaders are not standout jumps profiles. Consider ignoring the top 2 in the market for place / value analysis.
-              </p>
-              <p className="text-orange-300/60 text-xs italic">
-                Advisory only — rankings and picks are unchanged.
-              </p>
-            </>
-          ) : (
-            <p className="text-gray-400 text-xs">
-              No special jumps-market warning.
-            </p>
-          )}
-
-          {/* Exclude controls sit directly below the filter on Jumps races */}
-          {ExcludeControls && (
-            <div className="pt-2 border-t border-border/30">
-              {ExcludeControls}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Manual exclude controls for Flat races (shown outside the jumps section) */}
-      {!isJumps && ExcludeControls}
+      {/* Manual exclude controls */}
+      {ExcludeControls}
 
       {/* Top Picks */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
