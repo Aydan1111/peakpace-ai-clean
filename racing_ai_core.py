@@ -698,6 +698,58 @@ def _draw_pace_combo_multiplier(runner: Runner, runners: List["Runner"],
 # CONFIDENCE SYSTEM  (race + per-pick)
 # ============================================================
 
+def _jumps_check_filter(
+    race: "RaceInfo",
+    scored: list,
+    race_confidence: str,
+) -> dict:
+    """Advisory-only Jumps Check Filter.
+
+    Returns ON when a Jumps race has no standout top-2 profile and the race
+    looks open enough to consider looking for a value/place horse underneath.
+    Does NOT alter rankings, scores, or pick selection in any way.
+    """
+    is_jumps = race.discipline == "Jumps" or _is_nh(race.race_type)
+    if not is_jumps or len(scored) < 3:
+        return {"jumps_check_filter": "OFF", "jumps_check_reason": ""}
+
+    # A HIGH confidence race implies a clear standout — no advisory needed.
+    if race_confidence == "HIGH":
+        return {"jumps_check_filter": "OFF", "jumps_check_reason": ""}
+
+    top_score    = scored[0].get("score", 0)
+    second_score = scored[1].get("score", 0)
+    third_score  = scored[2].get("score", 0)
+
+    if top_score <= 0:
+        return {"jumps_check_filter": "OFF", "jumps_check_reason": ""}
+
+    # Gap between 1st and 2nd relative to top score.
+    # A small gap means no real standout at the top.
+    top_gap    = (top_score - second_score) / top_score
+    # Gap between 2nd and 3rd — narrow means the field is compressed.
+    second_gap = (second_score - third_score) / top_score if second_score > 0 else 0
+
+    if top_gap < 0.12:
+        if second_gap < 0.10:
+            reason = (
+                "Open jumps race — top 2 in the market are not standout profiles "
+                "and the field is compressed. Consider ignoring them and looking "
+                "for one value or place horse underneath."
+            )
+        else:
+            reason = (
+                "Jumps race with no clear separation at the top — market leaders "
+                "look solid but not standout. A value angle underneath may be "
+                "the better play."
+            )
+        return {"jumps_check_filter": "ON", "jumps_check_reason": reason}
+
+    return {"jumps_check_filter": "OFF", "jumps_check_reason": ""}
+
+
+# ============================================================
+
 def _race_confidence_label(
     scored: list,
     race: RaceInfo,
@@ -2563,11 +2615,15 @@ class RacingAICore:
             gold["confidence"], dark["confidence"] = g, d
         # ────────────────────────────────────────────────────────────────────
 
+        jumps_check = _jumps_check_filter(race, scored, race_confidence)
+
         return {
-            "gold_pick":       gold,
-            "silver_pick":     silver,
-            "dark_horse":      dark,
-            "race_confidence": race_confidence,
-            "full_rankings":   scored,
-            "wet_jumps_mode":  _is_wet_jumps(race),
+            "gold_pick":             gold,
+            "silver_pick":           silver,
+            "dark_horse":            dark,
+            "race_confidence":       race_confidence,
+            "full_rankings":         scored,
+            "wet_jumps_mode":        _is_wet_jumps(race),
+            "jumps_check_filter":    jumps_check["jumps_check_filter"],
+            "jumps_check_reason":    jumps_check["jumps_check_reason"],
         }
