@@ -1,5 +1,22 @@
 import { useState } from "react";
 
+/**
+ * Parse odds entered as fractional (e.g. "2/1", "5/2") or decimal (e.g. "3.5").
+ * Returns the decimal odds value, or NaN if not parseable.
+ */
+function parseOdds(value) {
+  if (value === "" || value == null) return NaN;
+  const str = String(value).trim();
+  if (str.includes("/")) {
+    const [num, den] = str.split("/").map(Number);
+    if (!isNaN(num) && !isNaN(den) && den !== 0) {
+      return num / den + 1; // fractional → decimal
+    }
+    return NaN;
+  }
+  return parseFloat(str);
+}
+
 function runJumpsCheck({ numRunners, confidence, scoreGap, topOdds, profileStrength }) {
   if (numRunners < 3) {
     return { status: "OFF", reason: "Fewer than 3 runners — filter not applicable." };
@@ -12,12 +29,13 @@ function runJumpsCheck({ numRunners, confidence, scoreGap, topOdds, profileStren
 
   // Signal 1: score gap between top 2
   if (scoreGap !== "" && parseFloat(scoreGap) < 12) {
-    signals.push("Score gap between top 2 is narrow (< 12%) — no clear model standout.");
+    signals.push("Model score gap between Gold and Silver is narrow (< 12%) — no clear model standout.");
   }
 
   // Signal 2: market dominance (top horse implied prob vs. field average)
-  if (topOdds !== "" && parseFloat(topOdds) > 1) {
-    const topProb = 1 / parseFloat(topOdds);
+  const decimalOdds = parseOdds(topOdds);
+  if (!isNaN(decimalOdds) && decimalOdds > 1) {
+    const topProb = 1 / decimalOdds;
     const avgProb = 1 / numRunners;
     if (topProb < 2 * avgProb) {
       signals.push("Top market horse is not dominating — implied probability is less than 2× field average.");
@@ -88,6 +106,9 @@ export default function JumpsCheckFilter() {
           <label className="block text-xs font-medium text-text-dim uppercase tracking-wider mb-1">
             Number of Runners
           </label>
+          <p className="text-xs text-text-dim/70 mb-1.5">
+            The race field size. Helps judge how open or messy the race is — more runners generally means more chaos and more risk at the top.
+          </p>
           <input
             type="number"
             min={2}
@@ -104,6 +125,9 @@ export default function JumpsCheckFilter() {
           <label className="block text-xs font-medium text-text-dim uppercase tracking-wider mb-1">
             Your Race Confidence
           </label>
+          <p className="text-xs text-text-dim/70 mb-1.5">
+            Your own broad read of how trustworthy this race looks overall — not the model score, but your gut on whether the race is readable.
+          </p>
           <select
             value={confidence}
             onChange={(e) => { setConfidence(e.target.value); setCheckResult(null); }}
@@ -118,8 +142,11 @@ export default function JumpsCheckFilter() {
         {/* Score gap */}
         <div>
           <label className="block text-xs font-medium text-text-dim uppercase tracking-wider mb-1">
-            Score Gap Between Top 2 (%)
+            Model Score Gap Between Gold and Silver (%)
           </label>
+          <p className="text-xs text-text-dim/70 mb-1.5">
+            The gap between the model's top-rated pick (Gold) and its second-rated pick (Silver) — not the market's top 2. A small gap means the model sees little to choose between them.
+          </p>
           <input
             type="number"
             min={0}
@@ -132,16 +159,17 @@ export default function JumpsCheckFilter() {
           />
         </div>
 
-        {/* Top horse decimal odds */}
+        {/* Top horse odds */}
         <div>
           <label className="block text-xs font-medium text-text-dim uppercase tracking-wider mb-1">
-            Top Market Horse — Decimal Odds
+            Top Market Horse — Odds
           </label>
+          <p className="text-xs text-text-dim/70 mb-1.5">
+            The betting market favourite's price. Helps judge whether the market leader is commanding — a short price suggests real market conviction, a long price suggests the field is open. Enter as fractional (e.g. 2/1, 5/2, 9/2) or decimal (e.g. 3.5).
+          </p>
           <input
-            type="number"
-            min={1}
-            step={0.1}
-            placeholder="e.g. 3.50 — leave blank if unknown"
+            type="text"
+            placeholder="e.g. 2/1 or 5/2 — leave blank if unknown"
             value={topOdds}
             onChange={(e) => { setTopOdds(e.target.value); setCheckResult(null); }}
             className="w-full bg-surface-light border border-border rounded-lg px-3 py-2 text-sm text-text focus:outline-none focus:border-gold/60"
@@ -153,6 +181,9 @@ export default function JumpsCheckFilter() {
           <label className="block text-xs font-medium text-text-dim uppercase tracking-wider mb-1">
             Top 2 Horses — Jumps Profile Strength
           </label>
+          <p className="text-xs text-text-dim/70 mb-1.5">
+            Your judgement of whether the top 2 in the market actually look like strong, standout jumps horses — based on form, connections, and course suitability.
+          </p>
           <select
             value={profileStrength}
             onChange={(e) => { setProfileStrength(e.target.value); setCheckResult(null); }}
