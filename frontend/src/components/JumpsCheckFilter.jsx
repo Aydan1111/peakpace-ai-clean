@@ -17,7 +17,19 @@ function parseOdds(value) {
   return parseFloat(str);
 }
 
-function runJumpsCheck({ numRunners, confidence, scoreGap, topOdds, profileStrength }) {
+/**
+ * Simple heuristic: does the entered text look like weak / unconvincing form?
+ * Looks for messy form characters (P, F, U, 0) and high finishing positions.
+ * Returns true when the form string looks broadly weak or empty.
+ */
+function looksWeak(formStr) {
+  if (!formStr || !formStr.trim()) return true;
+  const s = formStr.trim().toUpperCase();
+  const weakChars = (s.match(/[PFUOR0]/g) || []).length;
+  return weakChars >= Math.ceil(s.replace(/[^A-Z0-9]/g, "").length / 2);
+}
+
+function runJumpsCheck({ numRunners, confidence, scoreGap, topOdds, horse1, horse2 }) {
   if (numRunners < 3) {
     return { status: "OFF", reason: "Fewer than 3 runners — filter not applicable." };
   }
@@ -42,9 +54,15 @@ function runJumpsCheck({ numRunners, confidence, scoreGap, topOdds, profileStren
     }
   }
 
-  // Signal 3: jumps profile strength of top 2
-  if (profileStrength === "weak") {
-    signals.push("Neither of the top 2 market horses has a standout jumps profile.");
+  // Signal 3: broad read of top 2 market horses from entered details
+  // Advisory only — uses form text and whether connections were filled in as hints.
+  const h1Filled = (horse1.name || horse1.jockey || horse1.trainer).trim().length > 0;
+  const h2Filled = (horse2.name || horse2.jockey || horse2.trainer).trim().length > 0;
+  const h1FormWeak = looksWeak(horse1.form);
+  const h2FormWeak = looksWeak(horse2.form);
+
+  if (h1Filled && h2Filled && h1FormWeak && h2FormWeak) {
+    signals.push("Neither of the top 2 market horses shows convincing recent form or connections.");
   }
 
   if (signals.length >= 2) {
@@ -70,10 +88,15 @@ export default function JumpsCheckFilter() {
   const [confidence, setConfidence] = useState("medium");
   const [scoreGap, setScoreGap] = useState("");
   const [topOdds, setTopOdds] = useState("");
-  const [profileStrength, setProfileStrength] = useState("mixed");
+  const [horse1, setHorse1] = useState({ name: "", jockey: "", trainer: "", form: "" });
+  const [horse2, setHorse2] = useState({ name: "", jockey: "", trainer: "", form: "" });
   const [checkResult, setCheckResult] = useState(null);
 
   const canRun = numRunners !== "" && parseInt(numRunners, 10) >= 2;
+
+  const clearResult = () => setCheckResult(null);
+  const updateHorse1 = (field, val) => { setHorse1((h) => ({ ...h, [field]: val })); clearResult(); };
+  const updateHorse2 = (field, val) => { setHorse2((h) => ({ ...h, [field]: val })); clearResult(); };
 
   const handleRun = () => {
     setCheckResult(
@@ -82,7 +105,8 @@ export default function JumpsCheckFilter() {
         confidence,
         scoreGap,
         topOdds,
-        profileStrength,
+        horse1,
+        horse2,
       })
     );
   };
@@ -176,23 +200,62 @@ export default function JumpsCheckFilter() {
           />
         </div>
 
-        {/* Jumps profile strength */}
-        <div className="sm:col-span-2">
-          <label className="block text-xs font-medium text-text-dim uppercase tracking-wider mb-1">
-            Top 2 Horses — Jumps Profile Strength
+        {/* Top Market Horse */}
+        <div className="sm:col-span-2 border border-border/60 rounded-lg p-3 space-y-2">
+          <label className="block text-xs font-semibold text-gold/80 uppercase tracking-wider">
+            Top Market Horse
           </label>
-          <p className="text-xs text-text-dim/70 mb-1.5">
-            Your judgement of whether the top 2 in the market actually look like strong, standout jumps horses — based on form, connections, and course suitability.
-          </p>
-          <select
-            value={profileStrength}
-            onChange={(e) => { setProfileStrength(e.target.value); setCheckResult(null); }}
-            className="w-full bg-surface-light border border-border rounded-lg px-3 py-2 text-sm text-text focus:outline-none focus:border-gold/60"
-          >
-            <option value="strong">Strong — both are proven jumps performers</option>
-            <option value="mixed">Mixed — one standout, one questionable</option>
-            <option value="weak">Weak — neither has a standout jumps profile</option>
-          </select>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            <input
+              type="text" placeholder="Horse Name"
+              value={horse1.name} onChange={(e) => updateHorse1("name", e.target.value)}
+              className="bg-surface-light border border-border rounded-lg px-3 py-1.5 text-sm text-text focus:outline-none focus:border-gold/60"
+            />
+            <input
+              type="text" placeholder="Jockey"
+              value={horse1.jockey} onChange={(e) => updateHorse1("jockey", e.target.value)}
+              className="bg-surface-light border border-border rounded-lg px-3 py-1.5 text-sm text-text focus:outline-none focus:border-gold/60"
+            />
+            <input
+              type="text" placeholder="Trainer"
+              value={horse1.trainer} onChange={(e) => updateHorse1("trainer", e.target.value)}
+              className="bg-surface-light border border-border rounded-lg px-3 py-1.5 text-sm text-text focus:outline-none focus:border-gold/60"
+            />
+            <input
+              type="text" placeholder="Recent Form e.g. 1231F"
+              value={horse1.form} onChange={(e) => updateHorse1("form", e.target.value)}
+              className="bg-surface-light border border-border rounded-lg px-3 py-1.5 text-sm text-text focus:outline-none focus:border-gold/60"
+            />
+          </div>
+        </div>
+
+        {/* Second Market Horse */}
+        <div className="sm:col-span-2 border border-border/60 rounded-lg p-3 space-y-2">
+          <label className="block text-xs font-semibold text-gold/80 uppercase tracking-wider">
+            Second Market Horse
+          </label>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            <input
+              type="text" placeholder="Horse Name"
+              value={horse2.name} onChange={(e) => updateHorse2("name", e.target.value)}
+              className="bg-surface-light border border-border rounded-lg px-3 py-1.5 text-sm text-text focus:outline-none focus:border-gold/60"
+            />
+            <input
+              type="text" placeholder="Jockey"
+              value={horse2.jockey} onChange={(e) => updateHorse2("jockey", e.target.value)}
+              className="bg-surface-light border border-border rounded-lg px-3 py-1.5 text-sm text-text focus:outline-none focus:border-gold/60"
+            />
+            <input
+              type="text" placeholder="Trainer"
+              value={horse2.trainer} onChange={(e) => updateHorse2("trainer", e.target.value)}
+              className="bg-surface-light border border-border rounded-lg px-3 py-1.5 text-sm text-text focus:outline-none focus:border-gold/60"
+            />
+            <input
+              type="text" placeholder="Recent Form e.g. 21P40"
+              value={horse2.form} onChange={(e) => updateHorse2("form", e.target.value)}
+              className="bg-surface-light border border-border rounded-lg px-3 py-1.5 text-sm text-text focus:outline-none focus:border-gold/60"
+            />
+          </div>
         </div>
       </div>
 
