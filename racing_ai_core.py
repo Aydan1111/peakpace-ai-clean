@@ -730,7 +730,8 @@ def _draw_pace_combo_multiplier(runner: Runner, runners: List["Runner"],
 
 class RacingAICore:
 
-    # Retained for API compatibility; not used in Phase 1 scoring.
+    # Optional pick toggles (off by default).
+    silver_enabled: bool = False
     dark_horse_enabled: bool = False
 
     # --------------------------------------------------------
@@ -1234,16 +1235,87 @@ class RacingAICore:
                 "label":   "Gold Pick",
             }
 
+        # ── Silver pick (optional) ───────────────────────────────────────
+        silver = None
+        if self.silver_enabled and gold and len(scored) >= 2:
+            gold_top_factor = max(gold["factors"].items(), key=lambda kv: kv[1])[0]
+            threshold = gold["score"] * 0.85
+            for cand in scored[1:]:
+                if cand["score"] < threshold:
+                    break
+                cand_top = max(cand["factors"].items(), key=lambda kv: kv[1])[0]
+                if cand_top != gold_top_factor:
+                    silver = {
+                        "name":    cand["name"],
+                        "score":   cand["score"],
+                        "factors": cand["factors"],
+                        "label":   "Silver Pick",
+                    }
+                    break
+
+        # ── Dark Horse pick (optional) ───────────────────────────────────
+        dark_horse = None
+        if self.dark_horse_enabled and len(scored) > 3:
+            # Map name -> Runner for trend inspection
+            runner_by_name = {r.name: r for r in runners}
+            best_dh = None
+            best_dh_reason_strength = 0.0
+
+            for cand in scored[3:]:
+                # Plausibility gate: must score within 70% of Gold's score
+                if not gold or cand["score"] < gold["score"] * 0.70:
+                    continue
+
+                r = runner_by_name.get(cand["name"])
+                reason = None
+                strength = 0.0
+
+                # Improving trend: last 3 form > overall form by a margin
+                last3 = cand["factors"].get("last_3_form", 0)
+                overall = cand["factors"].get("overall_form", 0)
+                if last3 - overall >= 15:
+                    reason = "improving_trend"
+                    strength = last3 - overall
+
+                # Notably high single factor (>=80)
+                top_key, top_val = max(cand["factors"].items(), key=lambda kv: kv[1])
+                if top_val >= 80 and top_val > strength:
+                    reason = f"high_{top_key}"
+                    strength = top_val
+
+                if reason and strength > best_dh_reason_strength:
+                    best_dh_reason_strength = strength
+                    best_dh = {
+                        "name":    cand["name"],
+                        "score":   cand["score"],
+                        "factors": cand["factors"],
+                        "label":   "Dark Horse",
+                        "reason":  reason,
+                    }
+
+            dark_horse = best_dh
+
         # ── Labels on full rankings ──────────────────────────────────────
+        silver_name = silver["name"] if silver else None
+        dh_name = dark_horse["name"] if dark_horse else None
         for i, entry in enumerate(scored):
-            entry["label"] = "Gold Pick" if i == 0 else ""
+            if i == 0:
+                entry["label"] = "Gold Pick"
+            elif entry["name"] == silver_name:
+                entry["label"] = "Silver Pick"
+            elif entry["name"] == dh_name:
+                entry["label"] = "Dark Horse"
+            else:
+                entry["label"] = ""
 
         return {
-            "gold_pick":       gold,
-            "silver_pick":     None,
-            "dark_horse":      None,
-            "full_rankings":   scored,
-            "is_jumps":        is_jumps,
-            "is_flat":         is_flat,
-            "num_factors":     num_factors,
+            "gold_pick":           gold,
+            "silver_pick":         silver,
+            "dark_horse":          dark_horse,
+            "silver_available":    silver is not None,
+            "dark_horse_available": dark_horse is not None,
+            "full_rankings":       scored,
+            "is_jumps":            is_jumps,
+            "is_flat":             is_flat,
+            "num_factors":         num_factors,
         }
