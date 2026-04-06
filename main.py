@@ -102,6 +102,7 @@ class AnalyzeRequest(BaseModel):
     going: str
     runners: List[RunnerInput]
     odds: Optional[Dict[str, str]] = None
+    silver_enabled: bool = False
     dark_horse_enabled: bool = False
     ground_bucket: Optional[str] = None  # "Wet" | "Dry" | None — explicit override
 
@@ -120,6 +121,7 @@ class AnalyzeTextRequest(BaseModel):
     race_info: TextRaceInput
     racecard_text: str
     odds: Optional[Dict[str, str]] = None
+    silver_enabled: bool = False
     dark_horse_enabled: bool = False
 
 
@@ -842,6 +844,7 @@ def analyze(request: AnalyzeRequest):
             )
         )
 
+    engine.silver_enabled = request.silver_enabled
     engine.dark_horse_enabled = request.dark_horse_enabled
     result = engine.analyze(race, runner_objects, odds=request.odds)
 
@@ -1040,6 +1043,7 @@ def analyze_text(request: AnalyzeTextRequest):
     merged_odds  = {**inline_odds, **(request.odds or {})}
     final_odds   = merged_odds if merged_odds else None
 
+    engine.silver_enabled = request.silver_enabled
     engine.dark_horse_enabled = request.dark_horse_enabled
     result = engine.analyze(race, runner_objects, odds=final_odds)
 
