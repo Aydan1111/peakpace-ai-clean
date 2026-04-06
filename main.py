@@ -91,6 +91,9 @@ class RunnerInput(BaseModel):
     equipment: Optional[str] = ""
     previous_runs: Optional[List[dict]] = None
     pace_style: Optional[str] = None
+    or_rating: Optional[int] = None
+    rpr: Optional[int] = None
+    top_speed: Optional[int] = None
 
 
 class AnalyzeRequest(BaseModel):
@@ -429,7 +432,7 @@ def _discipline_from_race_type(race_type: str) -> dict:
 # -------------------------------------------------
 
 FIELD_KEYS = re.compile(
-    r"(Age|Weight|Trainer|Jockey|Form|F|Odds|Comment|Equipment|Draw|Pace)\s*:", re.I
+    r"(Age|Weight|Trainer|Jockey|Form|F|Odds|Comment|Equipment|Draw|Pace|Official\s+Rating|Top\s+Speed|OR|RPR|TS)\s*:", re.I
 )
 
 
@@ -459,8 +462,8 @@ _LABEL_NOISE = frozenset({"recent", "last", "previous", "latest", "current"})
 # Racing Post / racecard metadata lines that are NOT horse names and should be
 # silently skipped rather than treated as new runner boundaries.
 _NOISE_PREFIX_RE = re.compile(
-    r"^(official\s+rating|pedigree|bred|colour|color|sex|owner|"
-    r"prize|silks|rpr|or|sire|dam|breeder|rating|ran|p\.?p\.?|"
+    r"^(pedigree|bred|colour|color|sex|owner|"
+    r"prize|silks|sire|dam|breeder|rating|ran|p\.?p\.?|"
     r"weight\s+carried|trainer\s+form|jockey\s+form|stable|"
     r"date\s*\|?\s*course)\s*[:\|]",
     re.I,
@@ -516,6 +519,24 @@ def _extract_fields(current: dict, text: str):
             ps = _normalize_pace(m.group(1).strip())
             if ps:
                 current["pace_style"] = ps
+        m = re.search(r"(?:official\s+rating|\bor)[:\s]+(\d+)", token, re.I)
+        if m:
+            try:
+                current["or_rating"] = int(m.group(1))
+            except ValueError:
+                pass
+        m = re.search(r"\brpr[:\s]+(\d+)", token, re.I)
+        if m:
+            try:
+                current["rpr"] = int(m.group(1))
+            except ValueError:
+                pass
+        m = re.search(r"(?:top\s+speed|\bts)[:\s]+(\d+)", token, re.I)
+        if m:
+            try:
+                current["top_speed"] = int(m.group(1))
+            except ValueError:
+                pass
 
 
 def _prev_dist_to_furlongs(dist_str: str) -> Optional[float]:
@@ -787,6 +808,9 @@ def parse_racecard_text(text: str) -> list:
             "previous_runs": r.get("previous_runs") or None,
             "draw":          r.get("draw"),          # int or None
             "pace_style":    r.get("pace_style", ""),
+            "or_rating":     r.get("or_rating"),
+            "rpr":           r.get("rpr"),
+            "top_speed":     r.get("top_speed"),
         })
 
     return cleaned
@@ -841,6 +865,9 @@ def analyze(request: AnalyzeRequest):
                 equipment=r.equipment or "",
                 previous_runs=r.previous_runs,
                 pace_style=r.pace_style or "",
+                or_rating=r.or_rating,
+                rpr=r.rpr,
+                top_speed=r.top_speed,
             )
         )
 
@@ -1033,6 +1060,9 @@ def analyze_text(request: AnalyzeTextRequest):
             equipment=r.get("equipment", ""),
             previous_runs=r.get("previous_runs"),
             pace_style=r.get("pace_style", ""),
+            or_rating=r.get("or_rating"),
+            rpr=r.get("rpr"),
+            top_speed=r.get("top_speed"),
         )
         for r in runners
     ]
