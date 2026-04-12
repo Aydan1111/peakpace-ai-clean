@@ -13,6 +13,9 @@ const EMPTY_RUNNER = {
   equipment: "",
   comment: "",
   previous_runs: [],
+  or_rating: "",
+  rpr: "",
+  top_speed: "",
 };
 
 const PACE_OPTIONS = [
@@ -215,13 +218,14 @@ export default function RunnerTable({ runners, onChange }) {
                 }`}
               >
                 {expanded[i]
-                  ? "▴ Hide comment & recent runs"
-                  : "▾ Add comment & recent runs"}
+                  ? "▴ Hide ratings, comment & recent runs"
+                  : "▾ Add ratings (OR/RPR/TS), comment & recent runs"}
               </button>
               {expanded[i] && (
                 <div className="mt-3">
                   <DetailsPanel
                     runner={r}
+                    onUpdateField={(f, v) => update(i, f, v)}
                     onUpdateComment={(v) => update(i, "comment", v)}
                     onAddPrevRun={() => addPrevRun(i)}
                     onRemovePrevRun={(ri) => removePrevRun(i, ri)}
@@ -250,11 +254,53 @@ function CardField({ label, children, className = "" }) {
 
 // ── Details panel (COMMENT + RECENT RUNS) ────────────────────────────────────
 
-function DetailsPanel({ runner, onUpdateComment, onAddPrevRun, onRemovePrevRun, onUpdatePrevRun }) {
+function DetailsPanel({ runner, onUpdateField, onUpdateComment, onAddPrevRun, onRemovePrevRun, onUpdatePrevRun }) {
   const prevRuns = runner.previous_runs || [];
 
   return (
     <div className="space-y-4">
+
+      {/* RATINGS (optional — OR / RPR / TS) */}
+      <div>
+        <span className="text-xs text-text-dim uppercase tracking-wide">
+          RATINGS (OPTIONAL)
+        </span>
+        <div className="grid grid-cols-3 gap-2 mt-1">
+          <label className="flex flex-col gap-1">
+            <span className="text-[10px] text-text-dim uppercase tracking-wide">OR</span>
+            <input
+              type="number"
+              min={0}
+              value={runner.or_rating ?? ""}
+              onChange={(e) => onUpdateField("or_rating", e.target.value)}
+              placeholder="—"
+              className="input text-sm"
+            />
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="text-[10px] text-text-dim uppercase tracking-wide">RPR</span>
+            <input
+              type="number"
+              min={0}
+              value={runner.rpr ?? ""}
+              onChange={(e) => onUpdateField("rpr", e.target.value)}
+              placeholder="—"
+              className="input text-sm"
+            />
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="text-[10px] text-text-dim uppercase tracking-wide">TS</span>
+            <input
+              type="number"
+              min={0}
+              value={runner.top_speed ?? ""}
+              onChange={(e) => onUpdateField("top_speed", e.target.value)}
+              placeholder="—"
+              className="input text-sm"
+            />
+          </label>
+        </div>
+      </div>
 
       {/* COMMENT */}
       <label className="flex flex-col gap-1">

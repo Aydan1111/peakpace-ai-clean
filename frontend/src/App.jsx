@@ -239,9 +239,9 @@ const DEFAULT_RACE = {
 };
 
 const DEFAULT_RUNNERS = [
-  { name: "", age: 4, weight_st: "9-4", form: "", trainer: "", jockey: "", equipment: "", comment: "", previous_runs: [] },
-  { name: "", age: 4, weight_st: "9-4", form: "", trainer: "", jockey: "", equipment: "", comment: "", previous_runs: [] },
-  { name: "", age: 4, weight_st: "9-4", form: "", trainer: "", jockey: "", equipment: "", comment: "", previous_runs: [] },
+  { name: "", age: 4, weight_st: "9-4", form: "", trainer: "", jockey: "", equipment: "", comment: "", previous_runs: [], or_rating: "", rpr: "", top_speed: "" },
+  { name: "", age: 4, weight_st: "9-4", form: "", trainer: "", jockey: "", equipment: "", comment: "", previous_runs: [], or_rating: "", rpr: "", top_speed: "" },
+  { name: "", age: 4, weight_st: "9-4", form: "", trainer: "", jockey: "", equipment: "", comment: "", previous_runs: [], or_rating: "", rpr: "", top_speed: "" },
 ];
 
 // ---------------------------------------------------------------------------
@@ -260,7 +260,8 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  // Dark horse toggle — off by default; Gold + Silver only when false
+  // Silver + Dark Horse toggles — both off by default; Gold always shown
+  const [silverEnabled, setSilverEnabled] = useState(false);
   const [darkHorseEnabled, setDarkHorseEnabled] = useState(false);
 
   // When switching to guided mode for the first time, fetch and pre-populate
@@ -341,6 +342,7 @@ export default function App() {
             ground_bucket: race.ground_bucket || null,
           },
           racecard_text: guidedText,
+          silver_enabled: silverEnabled,
           dark_horse_enabled: darkHorseEnabled,
         };
       } else {
@@ -361,6 +363,10 @@ export default function App() {
               "PROMINENT": "prominent",
               "LEADER":    "leader",
             };
+            const toIntOrNull = (v) => {
+              const n = parseInt(v, 10);
+              return isNaN(n) ? null : n;
+            };
             return {
               name:             r.name,
               age:              r.age || 4,
@@ -374,9 +380,13 @@ export default function App() {
               comment:          r.comment   || "",
               previous_runs:    buildPrevRuns(r.previous_runs),
               pace_style:       paceMap[r.pace] || null,
+              or_rating:        toIntOrNull(r.or_rating),
+              rpr:              toIntOrNull(r.rpr),
+              top_speed:        toIntOrNull(r.top_speed),
             };
           }),
           odds: manualOddsPayload,
+          silver_enabled: silverEnabled,
           dark_horse_enabled: darkHorseEnabled,
         };
       }
@@ -460,10 +470,36 @@ export default function App() {
             />
           )}
 
-          {/* Dark Horse Toggle + Analyze button — hidden in precheck and jumps modes */}
+          {/* Silver + Dark Horse Toggles + Analyze button — hidden in precheck and jumps modes */}
           {inputMode !== "precheck" && inputMode !== "jumps" && (
             <>
-              <div className="flex justify-center">
+              <div className="flex flex-wrap justify-center items-center gap-x-8 gap-y-3">
+                {/* Silver Pick Toggle */}
+                <label className="flex items-center gap-3 cursor-pointer select-none group">
+                  {/* Track */}
+                  <span
+                    onClick={() => setSilverEnabled((v) => !v)}
+                    className={`relative inline-flex h-6 w-11 shrink-0 rounded-full border-2 transition-colors duration-200 ${
+                      silverEnabled
+                        ? "border-gray-300 bg-gray-300/30"
+                        : "border-border bg-surface-light"
+                    }`}
+                  >
+                    {/* Thumb */}
+                    <span
+                      className={`inline-block h-4 w-4 mt-0.5 rounded-full shadow transition-transform duration-200 ${
+                        silverEnabled
+                          ? "translate-x-5 bg-gray-200"
+                          : "translate-x-0.5 bg-text-dim"
+                      }`}
+                    />
+                  </span>
+                  <span className={`text-sm font-medium transition-colors ${silverEnabled ? "text-gray-200" : "text-text-dim"}`}>
+                    Enable Silver Pick
+                  </span>
+                </label>
+
+                {/* Dark Horse Toggle */}
                 <label className="flex items-center gap-3 cursor-pointer select-none group">
                   {/* Track */}
                   <span
@@ -508,7 +544,11 @@ export default function App() {
 
               {loading && <Spinner />}
 
-              <ResultsPanel result={result} />
+              <ResultsPanel
+                result={result}
+                silverEnabled={silverEnabled}
+                darkHorseEnabled={darkHorseEnabled}
+              />
             </>
           )}
         </div>

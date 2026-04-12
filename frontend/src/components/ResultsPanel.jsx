@@ -24,21 +24,36 @@ const PICK_CONFIG = {
   },
 };
 
-export default function ResultsPanel({ result }) {
-  if (!result) return null;
-
+export default function ResultsPanel({ result, silverEnabled = false, darkHorseEnabled = false }) {
   const [excludeSilver, setExcludeSilver] = useState(false);
   const [excludeDark, setExcludeDark] = useState(false);
+
+  if (!result) return null;
 
   // Map backend shape → UI shape
   const goldName   = result.gold_pick?.name;
   const silverName = result.silver_pick?.name;
   const darkName   = result.dark_horse?.name;
 
+  // Silver is shown only when the user asked for it AND the engine returned one.
+  const showSilver = silverEnabled && !!result.silver_pick;
+  // Dark horse: user asked AND engine returned one. Dedup against Silver only if
+  // Silver is actually being rendered, so the same horse doesn't appear twice.
+  const showDark =
+    darkHorseEnabled &&
+    !!result.dark_horse &&
+    !(showSilver && darkName === silverName);
+
+  // When a toggle is on but no pick came back, show a subtle message instead of hiding the slot.
+  const silverMissing = silverEnabled && !result.silver_pick;
+  const darkMissing =
+    darkHorseEnabled &&
+    (!result.dark_horse || (showSilver && darkName === silverName));
+
   const allPicks = [
     result.gold_pick && { pick: "GOLD", name: goldName, model_alignment: result.gold_pick.confidence, why: result.gold_pick.label, writeup: result.gold_pick.writeup, market_flag: result.gold_pick.market_flag },
-    result.silver_pick && { pick: "SILVER", name: silverName, model_alignment: result.silver_pick.confidence, why: result.silver_pick.label, writeup: result.silver_pick.writeup, market_flag: result.silver_pick.market_flag },
-    result.dark_horse && darkName !== silverName && { pick: "DARK HORSE", name: darkName, model_alignment: result.dark_horse.confidence, why: result.dark_horse.label, writeup: result.dark_horse.writeup },
+    showSilver && { pick: "SILVER", name: silverName, model_alignment: result.silver_pick.confidence, why: result.silver_pick.label, writeup: result.silver_pick.writeup, market_flag: result.silver_pick.market_flag },
+    showDark && { pick: "DARK HORSE", name: darkName, model_alignment: result.dark_horse.confidence, why: result.dark_horse.label, writeup: result.dark_horse.writeup },
   ].filter(Boolean);
 
   // Display-only exclusion — does NOT affect rankings or scores
@@ -57,8 +72,8 @@ export default function ResultsPanel({ result }) {
     ? "bg-gold/20 text-gold border-gold/40"
     : "bg-gray-500/20 text-gray-300 border-gray-500/40";
 
-  const hasSilver = !!result.silver_pick;
-  const hasDark   = !!(result.dark_horse && darkName !== silverName);
+  const hasSilver = showSilver;
+  const hasDark   = showDark;
 
   // Exclude controls block — reused below in Jumps section or standalone
   const ExcludeControls = (hasSilver || hasDark) ? (
@@ -158,6 +173,14 @@ export default function ResultsPanel({ result }) {
           );
         })}
       </div>
+
+      {/* Subtle empty-state messages — toggle was on but no pick returned */}
+      {(silverMissing || darkMissing) && (
+        <div className="flex flex-col gap-1 text-xs text-text-dim italic opacity-70">
+          {silverMissing && <p>No Silver pick for this race</p>}
+          {darkMissing && <p>No Dark Horse pick for this race</p>}
+        </div>
+      )}
 
       {/* Footer */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 pt-2 border-t border-border/50">
